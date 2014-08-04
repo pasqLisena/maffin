@@ -1,0 +1,11 @@
+{
+    "app_path": {
+        "input_dir": "D:\\video\\",
+        "output_dir": "D:\\video\\tmp\\"
+    },
+    "ffmpeg_path": {
+        "ffmpeg": "C:\\ffmpeg\\bin\\ffmpeg.exe",
+        "ffprobe": "C:\\ffmpeg\\bin\\ffprobe.exe"
+    },
+    "debug": true
+}
