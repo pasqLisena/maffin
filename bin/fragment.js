@@ -1,5 +1,6 @@
 var ffmpeg = require('fluent-ffmpeg'),
     fs = require('fs'),
+    spawn = require('child_process').spawn,
     config = require('../config.json');
 
 ffmpeg.setFfmpegPath(config.ffmpeg_path.ffmpeg);
@@ -7,7 +8,7 @@ ffmpeg.setFfprobePath(config.ffmpeg_path.ffprobe);
 
 var supportedFormats = {
     'mp4': {
-        'media':'video',
+        'media': 'video',
         'ext': 'mp4',
         'name': 'mp4',
         'lib': {
@@ -15,19 +16,19 @@ var supportedFormats = {
         }
     },
     'webm': {
-        'media':'video',
+        'media': 'video',
         'ext': 'webm',
         'name': 'webm',
-        'lib':{
-            'v':'libvpx'
+        'lib': {
+            'v': 'libvpx'
         }
     },
     'ogv': {
-        'media':'video',
+        'media': 'video',
         'ext': 'ogv',
         'name': 'ogv',
-        'lib':{
-            'v':'libtheora'
+        'lib': {
+            'v': 'libtheora'
         }
     }
 };
@@ -71,7 +72,6 @@ var Fragment = function (inputFilename, mfJson) {
         this.xywh = xywh;
     }
 };
-
 Fragment.prototype.getOutputFilename = function () {
     /*
      * It returns an appropriate output filename for fragment selected.
@@ -98,12 +98,68 @@ Fragment.prototype.getOutputFilename = function () {
         return output_dir + this.inputFilename + fragPart + '.' + this.inputFormat.ext;
 };
 
+Fragment.prototype.checkClosestIframe = function (time, callback) {
+    /*
+     *  Use ffmpeg to search closest I-frame (Intra-coded frame).
+     *  In the actual application, the param "time" is the start of fragment.
+     *
+     */
+    var checkUntil = time + 7;
+    var ffProcess = spawn(config.ffmpeg_path.ffprobe, ['-select_streams', '0:v:0', '-show_frames', '-read_intervals', time + '%' + checkUntil, '-print_format', 'json', this.inputPath]);
+    var jsonStr = '', metadata;
+    ffProcess.stdout.on('data', function (data) {
+        jsonStr += data;
+    });
+//    ffProcess.stderr.on('data', function (err) {
+//        if (DEBUG)
+//            console.error(err.toString());
+//    });
+    ffProcess.on('close', function (code) {
+        if (DEBUG)
+            console.log('child process exited with code ' + code);
+        if (code)callback(code);
+        metadata = JSON.parse(jsonStr);
+
+        if (!Array.isArray(metadata.frames)) {
+            callback('ffprobe did not return an array');
+            return;
+        }
+
+        var frames = metadata.frames;
+
+        // previous I-frame is always the first one
+        var prev = frames[0], foll;
+        var prevDiff = Math.abs(prev.pkt_pts_time - time);
+
+        // search for the next one
+        for (var f in frames) {
+            if (!frames.hasOwnProperty(f)) {
+                continue;
+            }
+            if (f == 0)continue;
+            var frame = frames[f];
+            if (frame.pict_type == 'I') {
+                foll = frame;
+                break;
+            }
+        }
+
+        if (!foll) callback(code, prev.pkt_pts_time);
+
+        var follDiff = Math.abs(foll.pkt_pts_time - time);
+        var closest = (prevDiff > follDiff) ? foll : prev;
+
+        callback(code, closest.pkt_pts_time);
+    });
+};
+
 Fragment.prototype.checkSource = function (callback) {
     /*
      *  6.3 Errors detectable based on information of the source media
      *  W3C reccomandation Media Fragments URI 1.0 (basic) @ http://www.w3.org/TR/2012/REC-media-frags-20120925/
      */
-    ffmpeg.ffprobe(this.inputPath, function (err, metadata) {
+    var frag = this;
+    ffmpeg.ffprobe(frag.inputPath, function (err, metadata) {
         if (err || !metadata || !metadata.hasOwnProperty('streams')) {
             console.error(err);
             // TODO something
@@ -114,16 +170,16 @@ Fragment.prototype.checkSource = function (callback) {
         var hasFragChanged;
         // time control
         var duration = metadata.streams[0].duration;
-        if (this.ssStart >= duration) {
+        if (frag.ssStart >= duration) {
             console.warn("Invalid time argument: it cannot be start >= total duration of video. Temporal fragment will be ignored");
-            this.ssStart = 0;
-            this.ssEnd = null;
+            frag.ssStart = 0;
+            frag.ssEnd = null;
             hasFragChanged = true;
         }
 
-        if (this.ssEnd && this.ssEnd >= duration) {
+        if (frag.ssEnd && frag.ssEnd >= duration) {
             console.warn("Invalid time argument: it cannot be end >= total duration of video. End parameter will be ignored");
-            this.ssEnd = null;
+            frag.ssEnd = null;
             hasFragChanged = true;
         }
 
@@ -138,96 +194,42 @@ Fragment.prototype.checkSource = function (callback) {
                 }
             }
         }
-        if (videoStream && this.xywh) {
+
+        if (videoStream && frag.xywh) {
             var vw = videoStream.width, vh = videoStream.height;
 
-            if (this.xywh.unit == 'pixel') {
-                if (this.xywh.x >= vw || this.xywh.y >= vh || this.xywh.x + this.xywh.w > vw || this.xywh.y + this.xywh.h > vh) {
+            if (frag.xywh.unit == 'pixel') {
+                if (frag.xywh.x >= vw || frag.xywh.y >= vh || frag.xywh.x + frag.xywh.w > vw || frag.xywh.y + frag.xywh.h > vh) {
                     console.warn("Invalid spatial argument: the rectangle area must be contained in video resolution. Spatial fragment will be ignored.");
-                    this.xywh = null;
+                    frag.xywh = null;
                     hasFragChanged = true;
                 }
             } else {
-                if (vw * this.xywh.w / 100 < 1) {
-                    this.xywh.w = Math.ceil(100 / vw);
+                if (vw * frag.xywh.w / 100 < 1) {
+                    frag.xywh.w = Math.ceil(100 / vw);
                     console.warn("Invalid spatial argument: the fragment width must be at least 1px Spatial fragment will be modified.");
                     hasFragChanged = true;
                 }
-                if (vh * this.xywh.h / 100 < 1) {
-                    this.xywh.h = Math.ceil(100 / vh);
+                if (vh * frag.xywh.h / 100 < 1) {
+                    frag.xywh.h = Math.ceil(100 / vh);
                     console.warn("Invalid spatial argument: the fragment height must be at least 1px Spatial fragment will be modified.");
                     hasFragChanged = true;
                 }
             }
         }
-        this.hasFragChanged = hasFragChanged;
-        callback(err);
-    });
-};
-Fragment.prototype.checkClosestIframe = function (callback) {
-    /*
-     *  6.3 Errors detectable based on information of the source media
-     *  W3C reccomandation Media Fragments URI 1.0 (basic) @ http://www.w3.org/TR/2012/REC-media-frags-20120925/
-     */
-    ffmpeg.ffprobe(this.inputPath, function (err, metadata) {
-        if (err || !metadata || !metadata.hasOwnProperty('streams')) {
-            console.error(err);
-            // TODO something
-            callback(err, false);
-            return;
-        }
 
-        var hasFragChanged;
-        // time control
-        var duration = metadata.streams[0].duration;
-        if (this.ssStart >= duration) {
-            console.warn("Invalid time argument: it cannot be start >= total duration of video. Temporal fragment will be ignored");
-            this.ssStart = 0;
-            this.ssEnd = null;
-            hasFragChanged = true;
-        }
-
-        if (this.ssEnd && this.ssEnd >= duration) {
-            console.warn("Invalid time argument: it cannot be end >= total duration of video. End parameter will be ignored");
-            this.ssEnd = null;
-            hasFragChanged = true;
-        }
-
-        // spatial control
-        var videoStream;
-        for (var s in metadata.streams) {
-            if (metadata.streams.hasOwnProperty(s)) {
-                var stream = metadata.streams[s];
-                if (stream.codec_type == 'video') {
-                    videoStream = stream;
-                    break;
-                }
+        frag.checkClosestIframe(frag.ssStart, function (err, newStart) {
+            if (!err && newStart && newStart != frag.ssStart) {
+                frag.iStart = Math.floor(newStart);
+                hasFragChanged = true;
             }
-        }
-        if (videoStream && this.xywh) {
-            var vw = videoStream.width, vh = videoStream.height;
 
-            if (this.xywh.unit == 'pixel') {
-                if (this.xywh.x >= vw || this.xywh.y >= vh || this.xywh.x + this.xywh.w > vw || this.xywh.y + this.xywh.h > vh) {
-                    console.warn("Invalid spatial argument: the rectangle area must be contained in video resolution. Spatial fragment will be ignored.");
-                    this.xywh = null;
-                    hasFragChanged = true;
-                }
-            } else {
-                if (vw * this.xywh.w / 100 < 1) {
-                    this.xywh.w = Math.ceil(100 / vw);
-                    console.warn("Invalid spatial argument: the fragment width must be at least 1px Spatial fragment will be modified.");
-                    hasFragChanged = true;
-                }
-                if (vh * this.xywh.h / 100 < 1) {
-                    this.xywh.h = Math.ceil(100 / vh);
-                    console.warn("Invalid spatial argument: the fragment height must be at least 1px Spatial fragment will be modified.");
-                    hasFragChanged = true;
-                }
-            }
-        }
-        this.hasFragChanged = hasFragChanged;
-        callback(err);
+            if (DEBUG)
+                console.log("the closest iframe is at time" + frag.iStart);
+
+            frag.hasFragChanged = hasFragChanged;
+            callback(err);
+        });
     });
 };
 
@@ -239,8 +241,9 @@ Fragment.prototype.process = function (callback) {
     var vcodec = 'copy', acodec = 'copy';
     var ffProcess = ffmpeg(this.inputPath);
 
-    if (this.ssStart)
-        options.push('-ss', this.ssStart + '');
+    var start = this.iStart || this.ssStart;
+    if (start)
+        options.push('-ss', start + '');
     if (this.ssEnd)
         options.push('-to', this.ssEnd + '');
 
