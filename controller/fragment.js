@@ -38,6 +38,7 @@ var input_dir = config.app_path.input_dir,
     DEBUG = config.debug;
 
 var availableTrack = ['video', 'audio'];
+availableTrack.sort();
 
 var Fragment = function (inputFilename, mfJson) {
     if (!inputFilename || !mfJson)
@@ -64,7 +65,7 @@ var Fragment = function (inputFilename, mfJson) {
     }
     this.trackList = trackList;
 
-    if (mfJson.xywh && (!this.trackList.length || this.trackList.contains('video'))) {
+    if (mfJson.xywh && (!this.trackList.length || this.trackList.indexOf('video') != -1)) {
         var xywh = mfJson.xywh[0];
         if (xywh.unit == 'percent' && xywh.x == 0 && xywh.y == 0 && xywh.w == 100 && xywh.h === 100) {
             xywh = null;
@@ -82,7 +83,7 @@ Fragment.prototype.getOutputFilename = function () {
     var fragPart = '';
     if (this.ssStart || this.ssEnd)
         fragPart += '_' + this.ssStart + (this.ssEnd ? '-' + this.ssEnd : '');
-    if (this.trackList.length && !this.trackList.equals(availableTrack)) { // if user select all tracks, is not a track-fragment
+    if (this.trackList.length && !this.trackList.sort().join(',') != availableTrack.join(',')) { // if user select all tracks, is not a track-fragment
         this.trackList.forEach(function (tk) {
             fragPart += '_' + tk;
         });
@@ -248,10 +249,10 @@ Fragment.prototype.process = function (callback) {
         options.push('-to', this.ssEnd + '');
 
     if (this.trackList.length) {
-        if (!this.trackList.contains('video')) {
+        if (this.trackList.indexOf('video') == -1) { //no video in tracklist
             ffProcess.noVideo();
         }
-        if (!this.trackList.contains('audio')) {
+        if (this.trackList.indexOf('audio') == -1) { //no audio in tracklist
             ffProcess.noAudio();
         }
     }

@@ -1,7 +1,7 @@
 var express = require('express'),
     fs = require('fs'),
     mfParser = require('mediafragment'),
-    Fragment = require('../bin/fragment'),
+    Fragment = require('../controller/fragment'),
     config = require('../config.json');
 
 
@@ -23,23 +23,23 @@ router.get('/:filename', function (req, res, next) {
         console.log('Request: ' + req.url);
 
     var mfquery = mfParser.parse(req.url).query;
-    if (mfquery.isEmpty()) {
+    if (Object.getOwnPropertyNames(mfquery).length == 0) {// is mf query empty?
         serveVideo(path, req, res);
         return;
     }
 
-    try{
-    var fragment = new Fragment(filename, mfquery);
-    fragment.generate(function (err, output_path) {
-        if (err) {
-            console.error("Something went wrong. Original video will be served");
-            //serve original video
-            serveVideo(path, req, res);
-            return;
-        }
-        serveVideo(output_path, req, res);
-    });
-    }catch (e){
+    try {
+        var fragment = new Fragment(filename, mfquery);
+        fragment.generate(function (err, output_path) {
+            if (err) {
+                console.error("Something went wrong. Original video will be served");
+                //serve original video
+                serveVideo(path, req, res);
+                return;
+            }
+            serveVideo(output_path, req, res);
+        });
+    } catch (e) {
         console.error(e);
         console.log("Original video will be served");
         serveVideo(path, req, res);
@@ -60,7 +60,7 @@ function serveVideo(path, req, res) {
 
     if (req.headers['range']) {
         var range = req.headers.range;
-        if (range.contains('bytes')) {
+        if (range.indexOf('bytes') != -1) {
             var parts = range.replace(/bytes=/, "").split("-");
             var partialstart = parts[0];
             var partialend = parts[1];
