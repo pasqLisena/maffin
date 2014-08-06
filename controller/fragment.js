@@ -1,7 +1,18 @@
 var ffmpeg = require('fluent-ffmpeg'),
-    fs = require('fs'),
     spawn = require('child_process').spawn,
+    path = require('path'),
+    fs = require('fs'),
+    mongo = require('mongodb'),
+    Grid = require('gridfs-stream'),
     config = require('../config.json');
+
+var db = mongo.Db('maffin', new mongo.Server(config.app_path.mongo_host, config.app_path.mongo_port, {}), {safe: true});
+var gfs, media;
+db.open(function (err) {
+    media = db.collection('media');
+    if (err)return handleError(err);
+    gfs = Grid(db, mongo);
+});
 
 ffmpeg.setFfmpegPath(config.ffmpeg_path.ffmpeg);
 ffmpeg.setFfprobePath(config.ffmpeg_path.ffprobe);
@@ -40,6 +51,50 @@ var input_dir = config.app_path.input_dir,
 var availableTrack = ['video', 'audio'];
 availableTrack.sort();
 
+function addAlias(name, file, callback){
+    media.insert({
+        frag: name,
+        alias: file._id,
+        last_request: Date.now()
+    }, callback);
+}
+
+function findAliasInDb(key, callback) {
+    media.find({frag: key}).limit(1).toArray(function (err, doc) {
+        if (err) {
+            callback(err);
+            return;
+        }
+        if (doc && doc.length) {
+            var alias = doc[0].alias;
+            gfs.files.find({_id: alias}).toArray(function (err, files) {
+                if (err) {
+                    callback(err);
+                    return;
+                }
+                callback(err, files[0]);
+            });
+        } else {
+            callback();
+        }
+
+    });
+}
+
+function findFileInDb(key, callback) {
+    gfs.exist({filename: key}, function (err, found) {
+        if (err) {
+            callback(err);
+            return;
+        }
+        if (found) {
+            gfs.files.find({filename: key}).toArray(function (err, files) {
+                callback(err, files[0]);
+            });
+        } else callback();
+    });
+}
+
 var Fragment = function (inputFilename, mfJson) {
     if (!inputFilename || !mfJson)
         throw Error('Fragment: all fields are mandatory');
@@ -49,7 +104,7 @@ var Fragment = function (inputFilename, mfJson) {
     this.inputFormat = supportedFormats[inputFilename.substr(lastDot + 1)];
     if (!this.inputFormat) throw Error('Format not supported');
 
-    this.inputPath = input_dir + inputFilename;
+    this.inputPath = path.join(input_dir, inputFilename);
     this.mfJson = mfJson;
 
     var t = mfJson.t && mfJson.t[0];
@@ -73,16 +128,19 @@ var Fragment = function (inputFilename, mfJson) {
         this.xywh = xywh;
     }
 };
+
 Fragment.prototype.getOutputFilename = function () {
     /*
      * It returns an appropriate output filename for fragment selected.
      * If there is a "false" fragment (i.e. "?t=0&track=audio&track=video"), it returns null
      */
     if (this.outputFilename && !this.hasFragChanged) return this.outputFilename;
+    this.hasFragChanged = false;
 
     var fragPart = '';
-    if (this.ssStart || this.ssEnd)
-        fragPart += '_' + this.ssStart + (this.ssEnd ? '-' + this.ssEnd : '');
+    var start = typeof this.iStart != "undefined" ? this.iStart : this.ssStart;
+    if (start || this.ssEnd)
+        fragPart += '_' + start + (this.ssEnd ? '-' + this.ssEnd : '');
     if (this.trackList.length && !this.trackList.sort().join(',') != availableTrack.join(',')) { // if user select all tracks, is not a track-fragment
         this.trackList.forEach(function (tk) {
             fragPart += '_' + tk;
@@ -93,10 +151,10 @@ Fragment.prototype.getOutputFilename = function () {
     else if (this.xywh && this.xywh.unit == 'percent')
         fragPart += '_PERCENT' + this.xywh.x + '-' + this.xywh.y + '-' + this.xywh.w + '-' + this.xywh.h;
 
-    if (!fragPart)
-        return this.inputPath;
-    else
-        return output_dir + this.inputFilename + fragPart + '.' + this.inputFormat.ext;
+    if (!fragPart) throw Error("False fragment!", "FalseFragmentError");
+
+    this.outputFilename = this.inputFilename + fragPart + '.' + this.inputFormat.ext;
+    return this.outputFilename;
 };
 
 Fragment.prototype.checkClosestIframe = function (time, callback) {
@@ -219,6 +277,12 @@ Fragment.prototype.checkSource = function (callback) {
             }
         }
 
+        if (!frag.ssStart) {
+            frag.hasFragChanged = hasFragChanged;
+            callback(err, hasFragChanged);
+            return;
+        }
+
         frag.checkClosestIframe(frag.ssStart, function (err, newStart) {
             if (!err && newStart && newStart != frag.ssStart) {
                 frag.iStart = Math.floor(newStart);
@@ -226,23 +290,23 @@ Fragment.prototype.checkSource = function (callback) {
             }
 
             if (DEBUG)
-                console.log("the closest iframe is at time" + frag.iStart);
+                console.log("the closest iframe is at time " + frag.iStart);
 
             frag.hasFragChanged = hasFragChanged;
-            callback(err);
+            callback(err, hasFragChanged);
         });
     });
 };
 
 Fragment.prototype.process = function (callback) {
     var options = ['-movflags', 'faststart'];
-//    if (DEBUG)
-//        options.push('-report', '-loglevel', 'verbose');
+    if (DEBUG)
+        options.push('-report', '-loglevel', 'verbose');
 
     var vcodec = 'copy', acodec = 'copy';
     var ffProcess = ffmpeg(this.inputPath);
 
-    var start = this.iStart || this.ssStart;
+    var start = typeof this.iStart != "undefined" ? this.iStart : this.ssStart;
     if (start)
         options.push('-ss', start + '');
     if (this.ssEnd)
@@ -269,6 +333,7 @@ Fragment.prototype.process = function (callback) {
         ffProcess.addOptions(options);
 
     ffProcess.videoCodec(vcodec).audioCodec(acodec);
+    var outPath = path.join(output_dir, this.getOutputFilename());
     ffProcess.on('start', function (commandLine) {
         if (DEBUG)
             console.log('Spawned Ffmpeg with command: ' + commandLine);
@@ -278,7 +343,7 @@ Fragment.prototype.process = function (callback) {
     }).on('end', function () {
         if (DEBUG)
             console.log('file has been converted succesfully');
-        callback(false);
+        callback(null, outPath);
     }).on('error', function (err, stdout, stderr) {
         console.error(err.message); //this will likely return "code=1" not really useful
         console.log("stdout:\n" + stdout);
@@ -291,39 +356,59 @@ Fragment.prototype.process = function (callback) {
         if (DEBUG)
             console.log('...closing time! bye');
     });
-    if (!this.outputFilename)
-        this.getOutputFilename();
-    ffProcess.output(this.outputFilename).run();
+    ffProcess.output(outPath).run();
 };
 
 Fragment.prototype.generate = function (callback) {
     /*
      * It runs the entire fragment generation process.
-     * At the end it returns the path of the file to serve
+     * At the end it returns the file to serve
      */
-    this.outputFilename = this.getOutputFilename();
-    if (fs.existsSync(this.outputFilename)) {
-        callback(false, this.outputFilename);
-        return;
-    }
-
     var frag = this;
-    this.checkSource(function (err, hasFragChanged) {
-        if (err) throw Error('Ffprobe error');
+    frag.originalOutputFileName = frag.getOutputFilename();
+    // we have now not a definitive filename but an alias
+    findAliasInDb(frag.getOutputFilename(), function (err, file) {
+        if (err)
+            return handleError(err);
 
-        //recalculate outputfile name
-        frag.outputFilename = frag.getOutputFilename();
-        if (fs.existsSync(frag.outputFilename)) {
-            callback(false, frag.outputFilename);
+        if (file) {
+            callback(err, file);
             return;
         }
 
-        frag.process(function (err) {
-            if (err) throw Error('Ffmpeg error');
+        frag.checkSource(function (err, hasFragChanged) {
+            if (err) throw Error('Ffprobe error');
 
-            callback(false, frag.outputFilename);
+            // we have now not a definitive filename
+            findFileInDb(frag.getOutputFilename(), function (err, file) {
+                if (err)return handleError(err);
+                if (file) {
+                    //we have a new "alias-file" couple
+                    addAlias(frag.originalOutputFileName, file, function (err) {
+                        callback(err, file);
+                    });
+                    return;
+                }
+
+                frag.process(function (err, outPath) {
+                    if (err) throw Error('Ffmpeg error');
+
+                    console.log(frag.originalOutputFileName)
+                    var writestream = gfs.createWriteStream({
+                        filename: frag.getOutputFilename()
+                    }).on('close', function (file) {
+                        media.insert({
+                            frag: frag.originalOutputFileName,
+                            alias: file._id,
+                            last_request: Date.now()
+                        }, function (err) {
+                            callback(err, file);
+                        });
+                    });
+                    fs.createReadStream(outPath).pipe(writestream);
+                });
+            });
         });
-
     });
 };
 

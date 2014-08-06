@@ -1,7 +1,9 @@
 {
     "app_path": {
         "input_dir": "D:\\video\\",
-        "output_dir": "D:\\video\\tmp\\"
+        "output_dir": "D:\\video\\tmp\\",
+        "mongo_host": "localhost",
+        "mongo_port": 27017
     },
     "ffmpeg_path": {
         "ffmpeg": "C:\\ffmpeg\\bin\\ffmpeg.exe",

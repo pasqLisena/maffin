@@ -1,6 +1,6 @@
 {
   "name": "maffin",
-  "version": "0.2.2",
+  "version": "0.3.0",
   "private": true,
   "scripts": {
     "start": "node ./bin/www"
@@ -15,6 +15,8 @@
     "jade": "~1.3.0",
     "node-compass": "0.2.3",
     "fluent-ffmpeg": "^2.0.0-rc1",
-    "mediafragment": "git+https://github.com/pasqLisena/node-mediafragment"
+    "mediafragment": "git+https://github.com/pasqLisena/node-mediafragment",
+    "mongodb": "^1.4.8",
+    "gridfs-stream": "^0.5.1"
   }
 }
