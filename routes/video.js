@@ -42,6 +42,7 @@ router.get('/:filename', function (req, res, next) {
         var fragment = new Fragment(filename, mfquery);
         fragment.generate(function (err, outputFragment) {
             if (err) {
+                console.error(err);
                 console.error("Something went wrong. Original video will be served");
                 //serve original video
                 serveVideo(inputVideoPath, req, res);

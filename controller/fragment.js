@@ -10,7 +10,8 @@ var db = mongo.Db('maffin', new mongo.Server(config.app_path.mongo_host, config.
 var gfs, media;
 db.open(function (err) {
     media = db.collection('media');
-    if (err)return handleError(err);
+    if (err)
+        throw Error(err);
     gfs = Grid(db, mongo);
 });
 
@@ -51,7 +52,7 @@ var input_dir = config.app_path.input_dir,
 var availableTrack = ['video', 'audio'];
 availableTrack.sort();
 
-function addAlias(name, file, callback){
+function addAlias(name, file, callback) {
     media.insert({
         frag: name,
         alias: file._id,
@@ -67,12 +68,10 @@ function findAliasInDb(key, callback) {
         }
         if (doc && doc.length) {
             var alias = doc[0].alias;
-            gfs.files.find({_id: alias}).toArray(function (err, files) {
-                if (err) {
-                    callback(err);
-                    return;
-                }
-                callback(err, files[0]);
+            gfs.files.findAndModify({_id: alias}, [
+                ['_id', 'asc']
+            ], {$set: {'metadata.lastRequest': Date.now()}}, {}, function (err, file) {
+                callback(err, file);
             });
         } else {
             callback();
@@ -88,8 +87,10 @@ function findFileInDb(key, callback) {
             return;
         }
         if (found) {
-            gfs.files.find({filename: key}).toArray(function (err, files) {
-                callback(err, files[0]);
+            gfs.files.findAndModify({filename: key}, [
+                ['_id', 'asc']
+            ], {$set: {'metadata.lastRequest': Date.now()}}, {}, function (err, file) {
+                callback(err, file);
             });
         } else callback();
     });
@@ -308,7 +309,7 @@ Fragment.prototype.process = function (callback) {
     var ffProcess = ffmpeg(this.inputPath);
 
     var start = typeof this.iStart != "undefined" ? this.iStart : this.ssStart;
-    if (start){
+    if (start) {
         start -= 0.1; // empirical correction
         options.push('-ss', start + '');
     }
@@ -371,9 +372,10 @@ Fragment.prototype.generate = function (callback) {
     frag.originalOutputFileName = frag.getOutputFilename();
     // we have now not a definitive filename but an alias
     findAliasInDb(frag.getOutputFilename(), function (err, file) {
-        if (err)
-            return handleError(err);
-
+        if (err) {
+            callback(err);
+            return;
+        }
         if (file) {
             callback(err, file);
             return;
@@ -384,7 +386,10 @@ Fragment.prototype.generate = function (callback) {
 
             // we have now not a definitive filename
             findFileInDb(frag.getOutputFilename(), function (err, file) {
-                if (err)return handleError(err);
+                if (err) {
+                    callback(err);
+                    return;
+                }
                 if (file) {
                     //we have a new "alias-file" couple
                     addAlias(frag.originalOutputFileName, file, function (err) {
@@ -399,12 +404,14 @@ Fragment.prototype.generate = function (callback) {
                     console.log(frag.originalOutputFileName)
                     var writestream = gfs.createWriteStream({
                         filename: frag.getOutputFilename(),
-                        contentType: 'video/'+frag.inputFormat.name
+                        contentType: 'video/' + frag.inputFormat.name,
+                        metadata: {
+                            lastRequest: Date.now()
+                        }
                     }).on('close', function (file) {
                         media.insert({
                             frag: frag.originalOutputFileName,
-                            alias: file._id,
-                            last_request: Date.now()
+                            alias: file._id
                         }, function (err) {
                             callback(err, file);
                         });
