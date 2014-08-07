@@ -7,7 +7,7 @@ var express = require('express'),
     Grid = require('gridfs-stream'),
     mongo = require('mongodb');
 
-var db = mongo.Db('maffin', new mongo.Server(config.app_path.mongo_host, config.app_path.mongo_port, {}), {safe: true});
+var db = mongo.Db('maffin', new mongo.Server(config.app_options.mongo_host, config.app_options.mongo_port, {}), {safe: true});
 var gfs;
 
 db.open(function (err) {
@@ -16,7 +16,7 @@ db.open(function (err) {
 });
 
 var router = express.Router();
-var videoDir = config.app_path.input_dir;
+var videoDir = config.app_options.input_dir;
 
 var DEBUG = config.debug;
 mfParser.setVerbose(DEBUG);

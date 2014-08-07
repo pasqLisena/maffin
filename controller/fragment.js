@@ -6,13 +6,35 @@ var ffmpeg = require('fluent-ffmpeg'),
     Grid = require('gridfs-stream'),
     config = require('../config.json');
 
-var db = mongo.Db('maffin', new mongo.Server(config.app_path.mongo_host, config.app_path.mongo_port, {}), {safe: true});
+var db = mongo.Db('maffin', new mongo.Server(config.app_options.mongo_host, config.app_options.mongo_port, {}), {safe: true});
 var gfs, media;
 db.open(function (err) {
     media = db.collection('media');
     if (err)
-        throw Error(err);
+        throw err;
     gfs = Grid(db, mongo);
+
+    var ttl_millis = config.app_options.frag_ttl * 1000;
+    setInterval(function () {
+        gfs.files.find({'metadata.lastRequest': {$lt: Date.now() - ttl_millis}}).toArray(function (err, data) {
+            if (err) {
+                console.err(err);
+                return;
+            }
+            if (!data)return;
+
+            for (var v in data) {
+                if (!data.hasOwnProperty(v)) continue;
+                var video = data[v];
+                gfs.remove({_id: video._id}, function (err) {
+                    if (err)console.log(err);
+                });
+                media.remove({alias: video._id}, function (err) {
+                    if (err)console.log(err);
+                })
+            }
+        });
+    }, ttl_millis);
 });
 
 ffmpeg.setFfmpegPath(config.ffmpeg_path.ffmpeg);
@@ -45,8 +67,8 @@ var supportedFormats = {
     }
 };
 
-var input_dir = config.app_path.input_dir,
-    output_dir = config.app_path.output_dir,
+var input_dir = config.app_options.input_dir,
+    output_dir = config.app_options.output_dir,
     DEBUG = config.debug;
 
 var availableTrack = ['video', 'audio'];
@@ -55,8 +77,7 @@ availableTrack.sort();
 function addAlias(name, file, callback) {
     media.insert({
         frag: name,
-        alias: file._id,
-        last_request: Date.now()
+        alias: file._id
     }, callback);
 }
 
@@ -286,9 +307,7 @@ Fragment.prototype.checkSource = function (callback) {
 
         frag.checkClosestIframe(frag.ssStart, function (err, newStart) {
             if (!err && newStart && newStart != frag.ssStart) {
-                console.log(newStart);
-                frag.iStart = parseFloat(newStart).toFixed(2);
-                console.log(frag.iStart);
+                frag.iStart = parseFloat(parseFloat(newStart).toFixed(2));
                 hasFragChanged = true;
 
                 if (DEBUG)
@@ -401,10 +420,10 @@ Fragment.prototype.generate = function (callback) {
                 frag.process(function (err, outPath) {
                     if (err) throw Error('Ffmpeg error');
 
-                    console.log(frag.originalOutputFileName)
                     var writestream = gfs.createWriteStream({
                         filename: frag.getOutputFilename(),
-                        contentType: 'video/' + frag.inputFormat.name,
+                        mode: 'w',
+                        content_type: 'video/' + frag.inputFormat.name,
                         metadata: {
                             lastRequest: Date.now()
                         }
@@ -413,6 +432,9 @@ Fragment.prototype.generate = function (callback) {
                             frag: frag.originalOutputFileName,
                             alias: file._id
                         }, function (err) {
+                            fs.unlink(outPath, function (err) {
+                                if (err) console.error(err);
+                            });
                             callback(err, file);
                         });
                     });
