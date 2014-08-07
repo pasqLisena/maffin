@@ -285,13 +285,14 @@ Fragment.prototype.checkSource = function (callback) {
 
         frag.checkClosestIframe(frag.ssStart, function (err, newStart) {
             if (!err && newStart && newStart != frag.ssStart) {
-                frag.iStart = Math.floor(newStart);
+                console.log(newStart);
+                frag.iStart = parseFloat(newStart).toFixed(2);
+                console.log(frag.iStart);
                 hasFragChanged = true;
+
+                if (DEBUG)
+                    console.log("the closest iframe is at time " + frag.iStart);
             }
-
-            if (DEBUG)
-                console.log("the closest iframe is at time " + frag.iStart);
-
             frag.hasFragChanged = hasFragChanged;
             callback(err, hasFragChanged);
         });
@@ -300,15 +301,17 @@ Fragment.prototype.checkSource = function (callback) {
 
 Fragment.prototype.process = function (callback) {
     var options = ['-movflags', 'faststart'];
-    if (DEBUG)
-        options.push('-report', '-loglevel', 'verbose');
+//    if (DEBUG)
+//        options.push('-report','-loglevel', 'verbose');
 
     var vcodec = 'copy', acodec = 'copy';
     var ffProcess = ffmpeg(this.inputPath);
 
     var start = typeof this.iStart != "undefined" ? this.iStart : this.ssStart;
-    if (start)
+    if (start){
+        start -= 0.1; // empirical correction
         options.push('-ss', start + '');
+    }
     if (this.ssEnd)
         options.push('-to', this.ssEnd + '');
 
@@ -395,7 +398,8 @@ Fragment.prototype.generate = function (callback) {
 
                     console.log(frag.originalOutputFileName)
                     var writestream = gfs.createWriteStream({
-                        filename: frag.getOutputFilename()
+                        filename: frag.getOutputFilename(),
+                        contentType: 'video/'+frag.inputFormat.name
                     }).on('close', function (file) {
                         media.insert({
                             frag: frag.originalOutputFileName,
