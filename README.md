@@ -3,13 +3,15 @@ maffin
 
 A Media Fragment Server in Node.js.
 
-h1. Requirements
+
+#Requirements
 
 * A recent version of [Node.js](http://www.nodejs.org/)
-* A [MongoDb] database running on your machine (or on a reachable host)
-* A recent build of [ffmpeg], that includes ffprobe
+* A [MongoDb](https://www.mongodb.org/) database running on your machine (or on a reachable host)
+* A recent build of [ffmpeg](https://ffmpeg.org/), that includes ffprobe
 
-h1. Install
+
+# Install
 
 Please install dependencies with
 <pre>npm install</pre>
@@ -32,13 +34,15 @@ You need also setup the file <code>config.json</code>:
 }
 </pre>
 
-h1. Supports
+
+# Supports
 
 This server supports the most common container and codec for web video:
 * MP4 with H264 video codec
 * WebM with VP8 video codec
 * Ogg with Theora video codec
 
-// TODO how to use
 
+# How to use
 
+Coming soon...
