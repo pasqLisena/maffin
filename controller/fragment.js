@@ -182,9 +182,13 @@ Fragment.prototype.getOutputFilename = function () {
 Fragment.prototype.checkClosestIframe = function (time, callback) {
     /*
      *  Use ffmpeg to search closest I-frame (Intra-coded frame).
-     *  In the actual application, the param "time" is the start of fragment.
+     *  i.e. the param "time" is the start of fragment.
      *
      */
+    if (typeof time != 'number') {
+        callback(); //no error, no data
+        return;
+    }
     var checkUntil = time + 7;
     var ffProcess = spawn(config.ffmpeg_path.ffprobe, ['-select_streams', '0:v:0', '-show_frames', '-read_intervals', time + '%' + checkUntil, '-print_format', 'json', this.inputPath]);
     var jsonStr = '', metadata;
@@ -198,7 +202,10 @@ Fragment.prototype.checkClosestIframe = function (time, callback) {
     ffProcess.on('close', function (code) {
         if (DEBUG)
             console.log('child process exited with code ' + code);
-        if (code)callback(code);
+        if (code) {
+            callback(code);
+            return;
+        }
         metadata = JSON.parse(jsonStr);
 
         if (!Array.isArray(metadata.frames)) {
@@ -225,12 +232,15 @@ Fragment.prototype.checkClosestIframe = function (time, callback) {
             }
         }
 
-        if (!foll) callback(code, prev.pkt_pts_time);
+        if (!foll) {
+            callback(code, prev.pkt_pts_time);
+            return;
+        }
 
         var follDiff = Math.abs(foll.pkt_pts_time - time);
         var closest = (prevDiff > follDiff) ? foll : prev;
 
-        callback(code, closest.pkt_pts_time);
+        callback(code, closest);
     });
 };
 
@@ -251,6 +261,8 @@ Fragment.prototype.checkSource = function (callback) {
         var hasFragChanged;
         // time control
         var duration = metadata.streams[0].duration;
+        frag.totalDuration = duration;
+
         if (frag.ssStart >= duration) {
             console.warn("Invalid time argument: it cannot be start >= total duration of video. Temporal fragment will be ignored");
             frag.ssStart = 0;
@@ -305,9 +317,9 @@ Fragment.prototype.checkSource = function (callback) {
             return;
         }
 
-        frag.checkClosestIframe(frag.ssStart, function (err, newStart) {
-            if (!err && newStart && newStart != frag.ssStart) {
-                frag.iStart = parseFloat(parseFloat(newStart).toFixed(2));
+        frag.checkClosestIframe(frag.ssStart, function (err, closest) {
+            if (!err && closest && closest.pkt_pts_time != frag.ssStart) {
+                frag.iStart = parseFloat(parseFloat(closest.pkt_pts_time).toFixed(2));
                 hasFragChanged = true;
 
                 if (DEBUG)
@@ -329,7 +341,7 @@ Fragment.prototype.process = function (callback) {
 
     var start = typeof this.iStart != "undefined" ? this.iStart : this.ssStart;
     if (start) {
-        start -= 0.1; // empirical correction
+        start = start > 0.1 ? start - 0.1 : 0; // empirical correction
         options.push('-ss', start + '');
     }
     if (this.ssEnd)
@@ -396,6 +408,7 @@ Fragment.prototype.generate = function (callback) {
             return;
         }
         if (file) {
+            frag.dbFile = file;
             callback(err, file);
             return;
         }
@@ -411,6 +424,7 @@ Fragment.prototype.generate = function (callback) {
                 }
                 if (file) {
                     //we have a new "alias-file" couple
+                    frag.dbFile = file;
                     addAlias(frag.originalOutputFileName, file, function (err) {
                         callback(err, file);
                     });
@@ -425,6 +439,7 @@ Fragment.prototype.generate = function (callback) {
                         mode: 'w',
                         content_type: 'video/' + frag.inputFormat.name,
                         metadata: {
+                            totalDuration: frag.totalDuration,
                             lastRequest: Date.now()
                         }
                     }).on('close', function (file) {
@@ -432,6 +447,7 @@ Fragment.prototype.generate = function (callback) {
                             frag: frag.originalOutputFileName,
                             alias: file._id
                         }, function (err) {
+                            frag.dbFile = file;
                             fs.unlink(outPath, function (err) {
                                 if (err) console.error(err);
                             });
@@ -446,4 +462,3 @@ Fragment.prototype.generate = function (callback) {
 };
 
 module.exports = Fragment;
-
