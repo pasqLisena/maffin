@@ -14,19 +14,6 @@ chrome.webRequest.onBeforeSendHeaders.addListener(
         var t = url.hash.t;
         if (t) {
             chrome.pageAction.show(details.tabId);
-//
-//            var xhr = new XMLHttpRequest();
-//            xhr.open("HEAD", details.url, true);
-//            xhr.onreadystatechange = function () {
-//                if (xhr.readyState == 4) {
-//                    // innerText does not let the attacker inject HTML elements.
-//                   var ar = xhr.getResponseHeader("Accept-Ranges");
-//                    if()
-//                    console.log(ar);
-//                }
-//            };
-//            xhr.send();
-
 
             t = t[0];
 
@@ -42,6 +29,21 @@ chrome.webRequest.onBeforeSendHeaders.addListener(
                 details.requestHeaders.push(rangeHeader);
             }
             rangeHeader.value = rangeValue;
+
+//            var xhr = new XMLHttpRequest();
+//            details.requestHeaders.forEach(function (header) {
+//                xhr.setRequestHeader(header.name, header.value)
+//            });
+//            console.log(xhr);
+//
+//            xhr.open("GET", details.url, true);
+//            xhr.onreadystatechange = function () {
+//                if (xhr.readyState == 4) {
+//                    console.log("Gone");
+//                    console.log(xhr.getAllResponseHeaders().toString());
+//                }
+//            };
+//            xhr.send();
             return {requestHeaders: details.requestHeaders};
         }
     },
