@@ -45,4 +45,10 @@ This server supports the most common container and codec for web video:
 
 # How to use
 
+<pre>
+set DEBUG = maffin
+node www
+</pre>
+
+
 Coming soon...

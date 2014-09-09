@@ -189,7 +189,18 @@ Fragment.prototype.checkClosestIframe = function (time, callback) {
         callback(); //no error, no data
         return;
     }
+
+    if (DEBUG)
+        console.log("look for iframe that is closest to time " + time);
+
     var checkUntil = time + 7;
+
+    // workaround: ffprobe has some trouble with read_intervals at 0
+    if(time == 0) time = -1;
+
+    if (DEBUG)
+        console.log("running ffprobe -select_streams 0:v:0 -show_frames -read_intervals "+ time + '%' + checkUntil, " -print_format json "+this.inputPath);
+
     var ffProcess = spawn(config.ffmpeg_path.ffprobe, ['-select_streams', '0:v:0', '-show_frames', '-read_intervals', time + '%' + checkUntil, '-print_format', 'json', this.inputPath]);
     var jsonStr = '', metadata;
     ffProcess.stdout.on('data', function (data) {
@@ -233,7 +244,7 @@ Fragment.prototype.checkClosestIframe = function (time, callback) {
         }
 
         if (!foll) {
-            callback(code, prev.pkt_pts_time);
+            callback(code, prev);
             return;
         }
 
