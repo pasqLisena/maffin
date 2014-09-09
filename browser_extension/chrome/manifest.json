@@ -7,20 +7,11 @@
         "128": "img/icon_128.png"
     },
     "permissions": [
-        "webRequest", "webRequestBlocking",
-        "*://*/*.aac",
+        "tabs",
+        "webRequest",
+        "webRequestBlocking",
         "*://*/*.mp4",
-        "*://*/*.m4a",
-        "*://*/*.m4v",
-        "*://*/*.mp1",
-        "*://*/*.mp2",
-        "*://*/*.mp3",
-        "*://*/*.mpg",
-        "*://*/*.mpeg",
-        "*://*/*.oga",
         "*://*/*.ogv",
-        "*://*/*.ogg",
-        "*://*/*.wav",
         "*://*/*.webm"
     ],
     "page_action": {
@@ -33,7 +24,9 @@
 
     "background": {
         "scripts": [
-            "js/mediafragment.js",
+            "js/lib/mediafragment.js",
+            "js/lib/jdataview.js",
+            "js/lib/jbinary.js",
             "js/content_script.js"
         ]
     },
