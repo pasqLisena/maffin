@@ -87,7 +87,7 @@ function serveVideo(video, req, res, options) {
     };
 
     if (isAFragment)
-        headers['Link'] = '<http://'+req.headers.host+'/video'+req.url.replace('?','#')+'>; rel="alternate"';
+        headers['Link'] = '<http://' + req.headers.host + '/video' + req.url.replace('?', '#') + '>; rel="alternate"';
 
     var outStream, httpCode;
     if (!options.ignoreRange && req.headers['range']) {
@@ -217,17 +217,18 @@ function serveVideo(video, req, res, options) {
 
                         var s1 = '\n--End\n' +
                             'Content-type: ' + mime + '\n' +
-                            'Content-Range: bytes 0-' + mdEnd + '\n';
+                            'Content-Range: bytes 0-' + mdEnd + '/' + totalBytes + '\n';
                         var s2 = '\n--End\n' +
                             'Content-type: ' + mime + '\n' +
-                            'Content-Range: bytes ' + startByte + '-' + endByte + '\n';
+                            'Content-Range: bytes ' + startByte + '-' + endByte + '/' + totalBytes + '\n';
                         block1 = new Buffer(s1, 'ascii');
                         block2 = new Buffer(s2, 'ascii');
                         block3 = new Buffer('\n--End\n', 'ascii');
                     }
 
                     headers['Content-Range'] = 'bytes ' + startByte + '-' + endByte + '/' + totalBytes;
-                    headers['Content-Length'] = includeSetup ? mdStream.length + outStream.length + block1.length + block2.length + block3.length - 1 : chunksize;
+                    headers['Content-Length'] = includeSetup ? mdStream.length + outStream.length + block1.length + block2.length + block3.length + 2 : chunksize;
+                    // the +2 is a +3 (for the 3 string buffers) -1 (because length are 0 based)
                     headers['Content-Range-Mapping'] = '{ t:npt ' + parseFloat(startNPT).toFixed(1) + '-' + parseFloat(endNPT).toFixed(1)
                         + (includeSetup ? ';include-setup' : '') + ' } = { bytes '
                         + (includeSetup ? '0-' + mdEnd + ',' : '') + startByte + '-' + endByte + '/' + totalBytes + ' }';
@@ -246,6 +247,7 @@ function serveVideo(video, req, res, options) {
                         res.write('0'); // ask to Yunlia
                         res.write(block2);
                         res.write(outStream);
+                        res.write('0'); // ask to Yunlia
                         res.end(block3);
                     }
                 });

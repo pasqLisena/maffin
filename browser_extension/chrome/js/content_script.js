@@ -2,7 +2,7 @@
  * @author pasquale.lisena@eurecom.fr
  */
 const multipartRegex = new RegExp("^multipart\/byteranges;boundary=(.+)$");
-const contentRangeRegex = new RegExp("^Content-Range: bytes ([0-9]+)-([0-9]+)");
+const contentRangeRegex = new RegExp("^Content-Range: bytes ([0-9]+)-([0-9]+)/([0-9]+)");
 
 var tRequests = {};
 
@@ -87,7 +87,13 @@ chrome.webRequest.onBeforeSendHeaders.addListener(
                     console.log(contentRange2);
                     contentRange2 = contentRange2.trim().match(contentRangeRegex);
                     var cRange2Diff = contentRange2[2] - contentRange2[1];
-                    var dataStart = view.tell(), dataEnd = file.length;
+                    var dataStart = view.tell(), dataEnd;
+
+                    s = "";
+                    while (s != null && s.trim().substr(2) != boundary) {
+                        dataEnd = view.tell();
+                        s = readByteRow(view);
+                    }
 
                     console.log("Ideal parts:");
                     console.log("metadata: " + cRange1Diff + " bytes");
@@ -113,7 +119,7 @@ chrome.webRequest.onBeforeSendHeaders.addListener(
                     bin.write('blob', bytes1);
                     bin.write('blob', bytes2);
 
-                    var blobUri = bin.toURI('video/mp4')
+                    var blobUri = bin.toURI('video/mp4');
                     console.log(blobUri);
                     chrome.tabs.create({'url': blobUri});
                 }
@@ -168,6 +174,11 @@ function readByteRow(view) {
         }
         return s;
     } catch (e) {
+        if (e.message == "Offsets are out of bounds.") {
+            console.debug("End of file reached");
+            console.log(s);
+            return s;
+        }
         console.error(e);
         console.log(view.tell());
     }
