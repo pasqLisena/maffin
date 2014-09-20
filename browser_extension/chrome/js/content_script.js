@@ -46,12 +46,15 @@ chrome.webRequest.onBeforeSendHeaders.addListener(
                 if (xhr.readyState == 4) {
 
                     console.log("Gone");
-                    var contentType = xhr.getResponseHeader("Content-Type");
+                    var contentType = xhr.getResponseHeader("Content-type");
                     var contentRange = xhr.getResponseHeader("Content-Range");
 
                     if (!contentType)throw new Error("No content type");
+
+                    // Chrome concats "Content-type" and "Content-Type"
+                    contentType = contentType.split(', ')[1];
                     var boundary = contentType.match(multipartRegex);
-                    if (boundary && boundary.length < 2)throw new Error("No explicit boundary");
+                    if (!boundary || boundary.length < 2)throw new Error("No explicit boundary");
                     boundary = boundary[1].trim();
 
                     var file = xhr.response;
@@ -122,7 +125,7 @@ chrome.webRequest.onBeforeSendHeaders.addListener(
     },
     {urls: [
 //        "*://*/*.aac",
-        "*://*/*.mp4",
+        "*://*/*.mp4*",
 //        "*://*/*.m4a",
 //        "*://*/*.m4v",
 //        "*://*/*.mp1",
@@ -131,10 +134,10 @@ chrome.webRequest.onBeforeSendHeaders.addListener(
 //        "*://*/*.mpg",
 //        "*://*/*.mpeg",
 //        "*://*/*.oga",
-        "*://*/*.ogv",
+        "*://*/*.ogv*",
 //        "*://*/*.ogg",
 //        "*://*/*.wav",
-        "*://*/*.webm"
+        "*://*/*.webm*"
     ]}, ["blocking", "requestHeaders"]
 );
 

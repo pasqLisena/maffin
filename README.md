@@ -1,4 +1,4 @@
-maffin
+MaFFiN
 ======
 
 A Media Fragment Server in Node.js.
@@ -16,7 +16,7 @@ A Media Fragment Server in Node.js.
 Please install dependencies with
 <pre>npm install</pre>
 
-You need also setup the file <code>config.json</code>:
+You need also to setup the file <code>config.json</code>:
 <pre>
 {
     "app_options": {
@@ -37,7 +37,7 @@ You need also setup the file <code>config.json</code>:
 
 # Supports
 
-This server supports the most common container and codec for web video:
+This server supports the most common containers and codecs for web videos:
 * MP4 with H264 video codec
 * WebM with VP8 video codec
 * Ogg with Theora video codec

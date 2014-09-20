@@ -117,11 +117,14 @@ function findFileInDb(key, callback) {
     });
 }
 
-var Fragment = function (inputFilename, mfJson) {
+var Fragment = function (inputFilename, mfJson, options) {
     if (!inputFilename || !mfJson)
         throw Error('Fragment: all fields are mandatory');
 
+    this.options = options || {};
+
     var lastDot = inputFilename.lastIndexOf('.');
+    this.fullInputFilename = inputFilename;
     this.inputFilename = inputFilename.substr(0, lastDot);
     this.inputFormat = supportedFormats[inputFilename.substr(lastDot + 1)];
     if (!this.inputFormat) throw Error('Format not supported');
@@ -196,20 +199,38 @@ Fragment.prototype.checkClosestIframe = function (time, callback) {
     var checkUntil = time + 7;
 
     // workaround: ffprobe has some trouble with read_intervals at 0
-    if(time == 0) time = -1;
+    if (time == 0) time = -1;
+
+    var ffOptions = ['-select_streams', '0:v:0', '-show_frames', '-read_intervals', time + '%' + checkUntil, '-print_format', 'json'];
+
+    if (this.options.fromGfs) {
+        ffOptions.push('-i', 'pipe:0');
+    } else ffOptions.push(this.inputPath);
 
     if (DEBUG)
-        console.log("running ffprobe -select_streams 0:v:0 -show_frames -read_intervals "+ time + '%' + checkUntil, " -print_format json "+this.inputPath);
+        console.log("running ffprobe" + ffOptions.join(' '));
 
-    var ffProcess = spawn(config.ffmpeg_path.ffprobe, ['-select_streams', '0:v:0', '-show_frames', '-read_intervals', time + '%' + checkUntil, '-print_format', 'json', this.inputPath]);
+    var ffProcess = spawn(config.ffmpeg_path.ffprobe, ffOptions);
+    if (this.options.fromGfs) {
+        var rStream = gfs.createReadStream({'filename': this.fullInputFilename});
+        rStream.pipe(ffProcess.stdin, {end:false});
+        rStream.on('end', function(){
+            rStream.unpipe();
+        });
+        ffProcess.stdin.on('error', function (err) {
+            console.error('Working with child.stdin failed: ' + err.message);
+        });
+    }
+
     var jsonStr = '', metadata;
+
     ffProcess.stdout.on('data', function (data) {
         jsonStr += data;
     });
-//    ffProcess.stderr.on('data', function (err) {
-//        if (DEBUG)
-//            console.error(err.toString());
-//    });
+    ffProcess.stderr.on('data', function (err) {
+        if (DEBUG)
+            console.error(err.toString());
+    });
     ffProcess.on('close', function (code) {
         if (DEBUG)
             console.log('child process exited with code ' + code);

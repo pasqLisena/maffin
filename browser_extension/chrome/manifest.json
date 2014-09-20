@@ -10,9 +10,9 @@
         "tabs",
         "webRequest",
         "webRequestBlocking",
-        "*://*/*.mp4",
-        "*://*/*.ogv",
-        "*://*/*.webm"
+        "*://*/*.mp4*",
+        "*://*/*.ogv*",
+        "*://*/*.webm*"
     ],
     "page_action": {
         "default_icon": {

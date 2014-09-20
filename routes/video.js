@@ -71,7 +71,7 @@ function serveVideo(video, req, res, options) {
     if (isAFragment) {
         totalBytes = video.dbFile.length;
         mime = 'video/' + video.inputFormat.name;
-        // TODO filename
+        filename = video.dbFile.filename;
     } else {
         var stat = fs.statSync(video);
         totalBytes = stat.size;
@@ -86,9 +86,13 @@ function serveVideo(video, req, res, options) {
         'Accept-Ranges': 'bytes, t'
     };
 
+    if (isAFragment)
+        headers['Link'] = '<http://'+req.headers.host+'/video'+req.url.replace('?','#')+'>; rel="alternate"';
+
     var outStream, httpCode;
     if (!options.ignoreRange && req.headers['range']) {
         var range = req.headers.range;
+
         httpCode = 206;
         var parts, partialstart , partialend;
         if (range.indexOf('bytes') != -1) {
@@ -120,10 +124,11 @@ function serveVideo(video, req, res, options) {
 
             var hashFragJSON = mfParser.parse('#t=npt:' + partialstart + ',' + partialend).hash;
 
-            if (!hashFragJSON.t) serveVideo(video, req, res, {ignoreRange: true});
-            var hashFrag = new Fragment(filename, hashFragJSON);
-            hashFrag.checkSource(function () {
-                var startByte, endByte, startNPT, endNPT, mdEnd = 0;
+            if (!hashFragJSON.t)
+                serveVideo(video, req, res, {ignoreRange: true});
+            var hashFrag = new Fragment(filename, hashFragJSON, {fromGfs: isAFragment});
+//            hashFrag.checkSource(function () {
+            var startByte, endByte, startNPT, endNPT, mdEnd = 0;
 
 //            hashFrag.generate(function (err, outputFragment) {
 //                if (err) {
@@ -136,150 +141,117 @@ function serveVideo(video, req, res, options) {
 //                serveVideo(hashFrag, req, res, {ignoreRange: true});
 //            });
 
-                async.parallel([
-                    function (asyncCallback) { // metadata
-                        if (!includeSetup) {
-                            asyncCallback();
-                            return;
-                        }
-                        hashFrag.checkClosestIframe(0, function (err, frame) {
-                            if (frame) {
-                                mdEnd = parseInt(frame.pkt_pos) - 1;
-
-                            }
-                            asyncCallback(err);
-                        });
-                    },
-                    function (asyncCallback) { //start frame
-                        hashFrag.checkClosestIframe(hashFrag.ssStart, function (err, frame) {
-                            if (frame) {
-                                startByte = parseInt(frame.pkt_pos);
-                                startNPT = frame.best_effort_timestamp_time;
-                            }
-                            asyncCallback(err);
-                        });
-                    }, function (asyncCallback) { //end frame
-                        if (!hashFrag.ssEnd) {
-                            endByte = totalBytes;
-                            endNPT = 'end';
-                            asyncCallback();
-                            return;
-                        }
-                        hashFrag.checkClosestIframe(hashFrag.ssEnd, function (err, frame) {
-                            if (frame) {
-                                endByte = parseInt(frame.pkt_pos) + parseInt(frame.pkt_size);
-                                endNPT = frame.best_effort_timestamp_time;
-                            }
-                            asyncCallback(err);
-                        });
+            async.parallel([
+                function (asyncCallback) { // metadata
+                    if (!includeSetup) {
+                        asyncCallback();
+                        return;
                     }
-                ], function (err) {
+                    hashFrag.checkClosestIframe(0, function (err, frame) {
+                        if (frame) {
+                            mdEnd = parseInt(frame.pkt_pos) - 1;
+
+                        }
+                        asyncCallback(err);
+                    });
+                },
+                function (asyncCallback) { //start frame
+                    hashFrag.checkClosestIframe(hashFrag.ssStart, function (err, frame) {
+                        if (frame) {
+                            startByte = parseInt(frame.pkt_pos);
+                            startNPT = frame.best_effort_timestamp_time;
+                        }
+                        asyncCallback(err);
+                    });
+                }, function (asyncCallback) { //end frame
+                    if (!hashFrag.ssEnd) {
+                        endByte = totalBytes;
+                        endNPT = 'end';
+                        asyncCallback();
+                        return;
+                    }
+                    hashFrag.checkClosestIframe(hashFrag.ssEnd, function (err, frame) {
+                        if (frame) {
+                            endByte = parseInt(frame.pkt_pos) + parseInt(frame.pkt_size);
+                            endNPT = frame.best_effort_timestamp_time + frame.pkt_duration_time;
+                        }
+                        asyncCallback(err);
+                    });
+                }
+            ], function (err) {
+                if (err) {
+                    console.error(err);
+                    console.error("Something went wrong.\nThe Range request will be ingored");
+                    serveVideo(video, req, res, true);
+                    return;
+                }
+
+                if (typeof endByte != 'number') {
+                    endNPT = hashFrag.totalDuration;
+                    endByte = totalBytes;
+                }
+
+                var readFile = function (callback) {
+                    if (isAFragment) {
+                        mongo.GridStore.read(db, video.dbFile.filename, callback);
+                    } else {
+                        fs.readFile(video, 'binary', callback);
+                    }
+                };
+
+                readFile(function (err, file) {
                     if (err) {
                         console.error(err);
-                        console.error("Something went wrong.\nThe Range request will be ingored");
+                        console.error("Something went wrong.\nThe Range request will be ignored");
                         serveVideo(video, req, res, true);
                         return;
                     }
+                    var mdStream, block1, block2, block3;
+                    outStream = new Buffer(file.slice(startByte, endByte));
 
-                    if (typeof endByte != 'number') {
-                        endNPT = hashFrag.totalDuration;
-                        endByte = totalBytes;
+                    if (includeSetup) {
+//                            mdStream = isAFragment ? gfs.createReadStream({'_id': video.dbFile._id, range: {startPos: 0, endPos: mdEnd}}) : fs.createReadStream(video, {start: 0, end: mdEnd});
+                        headers['Content-type'] = 'multipart/byteranges;boundary=End'; //note the lowercase "type"
+
+                        mdStream = new Buffer(file.slice(0, mdEnd));
+
+                        var s1 = '\n--End\n' +
+                            'Content-type: ' + mime + '\n' +
+                            'Content-Range: bytes 0-' + mdEnd + '\n';
+                        var s2 = '\n--End\n' +
+                            'Content-type: ' + mime + '\n' +
+                            'Content-Range: bytes ' + startByte + '-' + endByte + '\n';
+                        block1 = new Buffer(s1, 'ascii');
+                        block2 = new Buffer(s2, 'ascii');
+                        block3 = new Buffer('\n--End\n', 'ascii');
                     }
 
-                    var readFile = function (callback) {
-                        if (isAFragment) {
-                            //FIXME gridfs
-                        } else {
-                            fs.readFile(video, 'binary', callback);
-                        }
-                    };
+                    headers['Content-Range'] = 'bytes ' + startByte + '-' + endByte + '/' + totalBytes;
+                    headers['Content-Length'] = includeSetup ? mdStream.length + outStream.length + block1.length + block2.length + block3.length - 1 : chunksize;
+                    headers['Content-Range-Mapping'] = '{ t:npt ' + parseFloat(startNPT).toFixed(1) + '-' + parseFloat(endNPT).toFixed(1)
+                        + (includeSetup ? ';include-setup' : '') + ' } = { bytes '
+                        + (includeSetup ? '0-' + mdEnd + ',' : '') + startByte + '-' + endByte + '/' + totalBytes + ' }';
 
-                    readFile(function (err, file) {
-                        if (err) {
-                            console.error(err);
-                            console.error("Something went wrong.\nThe Range request will be ingored");
-                            serveVideo(video, req, res, true);
-                            return;
-                        }
+                    if (DEBUG)
+                        console.log('Content-Range-Mapping: ' + headers['Content-Range-Mapping']);
 
-                        if (includeSetup)
-                            headers['Content-Type'] = 'multipart/byteranges;boundary=End';
-                        headers['Content-Range'] = 'bytes ' + startByte + '-' + endByte + '/' + totalBytes;
-                        headers['Content-Length'] = chunksize;
-                        headers['Content-Range-Mapping'] = '{ t:npt ' + parseFloat(startNPT).toFixed(1) + '-' + parseFloat(endNPT).toFixed(1)
-                            + (includeSetup ? ';include-setup' : '') + ' } = { bytes '
-                            + (includeSetup ? '0-' + mdEnd + ',' : '') + startByte + '-' + endByte + '/' + totalBytes + ' }';
-
-                        if (DEBUG)
-                            console.log('Content-Range-Mapping: ' + headers['Content-Range-Mapping']);
-
-                        var mdStream, block1, block2;
-                        outStream = new Buffer(file.slice(startByte, endByte));
-
-                        if (includeSetup) {
-//                            mdStream = isAFragment ? gfs.createReadStream({'_id': video.dbFile._id, range: {startPos: 0, endPos: mdEnd}}) : fs.createReadStream(video, {start: 0, end: mdEnd});
-
-                            mdStream = new Buffer(file.slice(0, mdEnd));
-
-                            var s1 = '\n--End\n' +
-                                'Content-Type: ' + mime + '\n' +
-                                'Content-Range: bytes 0-' + mdEnd + '\n';
-                            var s2 = '\n--End\n' +
-                                'Content-Type: ' + mime + '\n' +
-                                'Content-Range: bytes ' + startByte + '-' + endByte + '\n';
-                            block1 = new Buffer(s1, 'ascii');
-                            block2 = new Buffer(s2, 'ascii');
-                            headers['Content-Length'] = mdStream.length + outStream.length + block1.length + block2.length - 1;
-                        }
 //                        outStream = isAFragment ? gfs.createReadStream({'_id': video.dbFile._id, range: {startPos: startByte, endPos: endByte}}) : fs.createReadStream(video, {start: startByte, end: endByte});
 
-                        res.writeHead(httpCode, headers);
-                        if (!includeSetup) {
-                            outStream.pipe(res);
-                        } else {
-                            res.write(block1);
-                            res.write(mdStream);
-                            res.write('0'); // ask to Yunlia
-                            res.write(block2);
-                            res.write(outStream);
-                            res.end();
-//                        mdStream.pipe(res, { end: false });
-//                            mdStream.on('data', function (chunk) {
-//
-//                                console.log('got %d bytes of metadata', chunk.length);
-////                            mdL += chunk.length;
-//                                res.write(chunk, 'binary');
-//                            });
-//                            mdStream.on('end', function () {
-//                                console.log('end mdstream');
-//                                res.write(block2);
-//
-////                                outStream = isAFragment ? gfs.createReadStream({'_id': video.dbFile._id, range: {startPos: startByte, endPos: endByte}}) : fs.createReadStream(video, {start: startByte, end: endByte});
-//                                outStream = new Buffer(video.slice(startByte, endByte));
-//                                outStream.on('data', function (chunk) {
-//                                    console.log('got %d bytes of data', chunk.length);
-////                                outL += chunk.length;
-//                                    res.write(chunk, 'binary');
-////                                if (ready === false) {
-////                                    this.pause();
-////                                    res.once('drain', this.resume.bind(this))
-////                                }
-//                                });
-////                            outStream.pipe(res, { end: false });
-//                                outStream.on('end', function () {
-//                                    console.log(totalBytes + ' ' + endByte)
-////                              outStream.unpipe();
-//                                    console.log('ENDING');
-////                                res.write(new Buffer("ENDING", 'binary'));
-//                                    res.end();
-//                                });
-//                            });
-
-                        }
-                    });
-
+                    res.writeHead(httpCode, headers);
+                    if (!includeSetup) {
+                        outStream.pipe(res);
+                    } else {
+                        res.write(block1);
+                        res.write(mdStream);
+                        res.write('0'); // ask to Yunlia
+                        res.write(block2);
+                        res.write(outStream);
+                        res.end(block3);
+                    }
                 });
+
             });
+//            });
             return;
         }
     }
