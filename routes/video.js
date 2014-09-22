@@ -67,10 +67,9 @@ function serveVideo(video, req, res, options) {
     options = options || {};
     var isAFragment = video instanceof Fragment;
 
-    var totalBytes, mime, filename, totalDuration;
+    var totalBytes, mime, filename;
     if (isAFragment) {
         totalBytes = video.dbFile.length;
-        totalDuration = video.totalDuration || video.dbFile.metadata.totalDuration;
         mime = 'video/' + video.inputFormat.name;
         filename = video.dbFile.filename;
     } else {
@@ -127,9 +126,9 @@ function serveVideo(video, req, res, options) {
 
             if (!hashFragJSON.t)
                 serveVideo(video, req, res, {ignoreRange: true});
-            var hashFrag = new Fragment(filename, hashFragJSON, {fromGfs: isAFragment});
+            var hashFrag = new Fragment(filename, hashFragJSON, {fromGfs: true, dbFile: video.dbFile});
 //            hashFrag.checkSource(function () {
-            var startByte, endByte, startNPT, endNPT, mdEnd = 0;
+            var totalDuration, startByte, endByte, startNPT, endNPT, mdEnd = 0;
 
 //            hashFrag.generate(function (err, outputFragment) {
 //                if (err) {
@@ -144,9 +143,10 @@ function serveVideo(video, req, res, options) {
 
             async.parallel([
                     function (asyncCallback) {//totalDuration
-                        if (isAFragment)  // I already have this information
+                        if (isAFragment) {
+                            totalDuration = video.dbFile.metadata.fragDuration;
                             asyncCallback();
-                        else hashFrag.checkSource(function () {
+                        } else hashFrag.checkSource(function () {
                             totalDuration = hashFrag.totalDuration;
                             asyncCallback();
                         });
@@ -156,19 +156,18 @@ function serveVideo(video, req, res, options) {
                             asyncCallback();
                             return;
                         }
-                        hashFrag.checkClosestIframe(0, function (err, frame) {
+                        hashFrag.findClosestIframe(0, function (err, frame) {
                             if (frame) {
                                 mdEnd = parseInt(frame.pkt_pos) - 1;
-
                             }
                             asyncCallback(err);
                         });
                     },
                     function (asyncCallback) { //start frame
-                        hashFrag.checkClosestIframe(hashFrag.ssStart, function (err, frame) {
+                        hashFrag.findClosestIframe(hashFrag.ssStart, function (err, frame) {
                             if (frame) {
                                 startByte = parseInt(frame.pkt_pos);
-                                startNPT = frame.best_effort_timestamp_time;
+                                startNPT = frame.pkt_pts_time;
                             }
                             asyncCallback(err);
                         });
@@ -180,10 +179,10 @@ function serveVideo(video, req, res, options) {
                             asyncCallback();
                             return;
                         }
-                        hashFrag.checkClosestIframe(hashFrag.ssEnd, function (err, frame) {
+                        hashFrag.findClosestIframe(hashFrag.ssEnd, function (err, frame) {
                             if (frame) {
                                 endByte = parseInt(frame.pkt_pos) + parseInt(frame.pkt_size);
-                                endNPT = frame.best_effort_timestamp_time + frame.pkt_duration_time;
+                                endNPT = frame.pkt_pts_time + frame.pkt_duration_time;
                             }
                             asyncCallback(err);
                         });

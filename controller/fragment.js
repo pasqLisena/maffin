@@ -2,6 +2,7 @@ var ffmpeg = require('fluent-ffmpeg'),
     spawn = require('child_process').spawn,
     path = require('path'),
     fs = require('fs'),
+    async = require('async'),
     mongo = require('mongodb'),
     Grid = require('gridfs-stream'),
     config = require('../config.json');
@@ -164,8 +165,9 @@ Fragment.prototype.getOutputFilename = function () {
 
     var fragPart = '';
     var start = typeof this.iStart != "undefined" ? this.iStart : this.ssStart;
-    if (start || this.ssEnd)
-        fragPart += '_' + start + (this.ssEnd ? '-' + this.ssEnd : '');
+    var end = typeof this.iEnd != "undefined" ? this.iEnd : this.ssEnd;
+    if (start || end)
+        fragPart += '_' + start + (end ? '-' + end : '');
     if (this.trackList.length && !this.trackList.sort().join(',') != availableTrack.join(',')) { // if user select all tracks, is not a track-fragment
         this.trackList.forEach(function (tk) {
             fragPart += '_' + tk;
@@ -182,7 +184,33 @@ Fragment.prototype.getOutputFilename = function () {
     return this.outputFilename;
 };
 
-Fragment.prototype.checkClosestIframe = function (time, callback) {
+/*
+ * Custom call to ffprobe.
+ */
+function spawnFfprobe(options, callback) {
+    var jsonStr = '';
+
+    if (DEBUG)
+        console.log("running ffprobe " + options.join(' '));
+
+    var ffProcess = spawn(config.ffmpeg_path.ffprobe, options);
+    ffProcess.stdout.on('data', function (data) {
+        jsonStr += data;
+    });
+//    ffProcess.stderr.on('data', function (err) {
+//        if (DEBUG)
+//            console.error(err.toString());
+//    });
+    ffProcess.on('close', function (code) {
+        if (DEBUG)
+            console.log('child process exited with code ' + code);
+        if (code) {
+            callback(code);
+        } else callback(code, JSON.parse(jsonStr));
+    });
+}
+
+Fragment.prototype.findClosestIframe = function (time, callback) {
     /*
      *  Use ffmpeg to search closest I-frame (Intra-coded frame).
      *  i.e. the param "time" is the start of fragment.
@@ -196,53 +224,67 @@ Fragment.prototype.checkClosestIframe = function (time, callback) {
     if (DEBUG)
         console.log("look for iframe that is closest to time " + time);
 
+
+    if (this.options.fromGfs) {
+        //we already runs ffprobe
+        if (!this.dbFile) {
+            if (!this.options.dbFile) {
+                // this should never happen
+                callback(new Error("no references on db"));
+            }
+            this.dbFile = this.options.dbFile;
+        }
+        var frames = this.outFrames || this.dbFile.metadata.frames;
+        this.outFrames = frames;
+
+        //search previous and next frames
+        var prev = frames[0], foll;
+        for (var f in frames) {
+            if (!frames.hasOwnProperty(f)) {
+                continue;
+            }
+
+            var frame = frames[f];
+            if (frame.pict_type == 'I') {
+                if (frame.pkt_pts_time <= time)
+                    prev = frame;
+                else {
+                    foll = frame;
+                    break;
+                }
+            }
+        }
+
+        if (prev.pkt_pts_time <= 0.1) prev.pkt_pts_time = 0; //empirical correction
+
+        if (!foll) {
+            callback(null, prev);
+            return
+        }
+
+        var prevDiff = Math.abs(prev.pkt_pts_time - time);
+        var follDiff = Math.abs(foll.pkt_pts_time - time);
+        var closest = (prevDiff > follDiff) ? foll : prev;
+
+        callback(null, closest);
+        return;
+    }
+
     var checkUntil = time + 7;
 
     // workaround: ffprobe has some trouble with read_intervals at 0
     if (time == 0) time = -1;
 
-    var ffOptions = ['-select_streams', '0:v:0', '-show_frames', '-read_intervals', time + '%' + checkUntil, '-print_format', 'json'];
+    var ffOptions = ['-select_streams', '0:v:0', '-show_frames', '-read_intervals', time + '%' + checkUntil, '-print_format', 'json', this.inputPath];
 
-    if (this.options.fromGfs) {
-        ffOptions.push('-i', 'pipe:0');
-    } else ffOptions.push(this.inputPath);
-
-    if (DEBUG)
-        console.log("running ffprobe" + ffOptions.join(' '));
-
-    var ffProcess = spawn(config.ffmpeg_path.ffprobe, ffOptions);
-    if (this.options.fromGfs) {
-        var rStream = gfs.createReadStream({'filename': this.fullInputFilename});
-
-        rStream.pipe(ffProcess.stdin, {end:false});
-        rStream.on('end', function(){
-            rStream.unpipe();
-        });
-        ffProcess.stdin.on('error', function (err) {
-            console.error('Working with child.stdin failed: ' + err.message);
-        });
-    }
-
-    var jsonStr = '', metadata;
-
-    ffProcess.stdout.on('data', function (data) {
-        jsonStr += data;
-    });
-//    ffProcess.stderr.on('data', function (err) {
-//        if (DEBUG)
-//            console.error(err.toString());
-//    });
-    ffProcess.on('close', function (code) {
-        if (DEBUG)
-            console.log('child process exited with code ' + code);
-        if (code) {
-            callback(code);
+    spawnFfprobe(ffOptions, function (err, metadata) {
+        if (err) {
+            callback(err);
             return;
         }
-        metadata = JSON.parse(jsonStr);
 
         if (!Array.isArray(metadata.frames)) {
-            callback('ffprobe did not return an array');
+            callback(new Error('ffprobe did not return an array'));
             return;
         }
 
@@ -273,9 +315,24 @@ Fragment.prototype.checkClosestIframe = function (time, callback) {
         var follDiff = Math.abs(foll.pkt_pts_time - time);
         var closest = (prevDiff > follDiff) ? foll : prev;
 
-        callback(code, closest);
+        callback(err, closest);
     });
 };
+
+function getFullFramesJson(path, callback) {
+    var ffOptions = ['-select_streams', '0:v:0', '-show_frames', '-print_format', 'json', path];
+    spawnFfprobe(ffOptions, function (err, data) {
+        if (err) {
+            callback(err);
+            return;
+        }
+        if (!data || !data.frames) {
+            callback(new Error("No data"));
+            return;
+        }
+        callback(err, data.frames);
+    });
+}
 
 Fragment.prototype.checkSource = function (callback) {
     /*
@@ -344,23 +401,42 @@ Fragment.prototype.checkSource = function (callback) {
             }
         }
 
-        if (!frag.ssStart) {
-            frag.hasFragChanged = hasFragChanged;
-            callback(err, hasFragChanged);
-            return;
-        }
+        async.parallel([
+                function (async_callback) {
+                    if (!frag.ssStart)
+                        async_callback();
+                    else
+                        frag.findClosestIframe(frag.ssStart, function (e, closest) {
+                            if (!e && closest && closest.pkt_pts_time != frag.ssStart) {
+                                frag.iStart = parseFloat(parseFloat(closest.pkt_pts_time).toFixed(2));
+                                hasFragChanged = true;
 
-        frag.checkClosestIframe(frag.ssStart, function (err, closest) {
-            if (!err && closest && closest.pkt_pts_time != frag.ssStart) {
-                frag.iStart = parseFloat(parseFloat(closest.pkt_pts_time).toFixed(2));
-                hasFragChanged = true;
+                                if (DEBUG)
+                                    console.log("the closest iframe to start is at time " + frag.iStart);
+                            }
+                            async_callback();
+                        })
+                },
+                function (async_callback) {
+                    if (!frag.ssEnd)
+                        async_callback();
+                    else
+                        frag.findClosestIframe(frag.ssEnd, function (e, closest) {
+                            if (!e && closest && closest.pkt_pts_time != frag.ssEnd) {
+                                frag.iEnd = parseFloat(parseFloat(closest.pkt_pts_time).toFixed(2));
+                                hasFragChanged = true;
 
-                if (DEBUG)
-                    console.log("the closest iframe is at time " + frag.iStart);
-            }
-            frag.hasFragChanged = hasFragChanged;
-            callback(err, hasFragChanged);
-        });
+                                if (DEBUG)
+                                    console.log("the closest iframe to end is at time " + frag.iEnd);
+                            }
+                            async_callback();
+                        });
+                }
+            ],
+            function () {
+                frag.hasFragChanged = hasFragChanged;
+                callback(err, hasFragChanged);
+            });
     });
 };
 
@@ -373,12 +449,13 @@ Fragment.prototype.process = function (callback) {
     var ffProcess = ffmpeg(this.inputPath);
 
     var start = typeof this.iStart != "undefined" ? this.iStart : this.ssStart;
+    var end = typeof this.iEnd != "undefined" ? this.iEnd : this.ssEnd;
     if (start) {
         start = start > 0.1 ? start - 0.1 : 0; // empirical correction
         options.push('-ss', start + '');
     }
-    if (this.ssEnd)
-        options.push('-to', this.ssEnd + '');
+    if (end)
+        options.push('-to', end + '');
 
     if (this.trackList.length) {
         if (this.trackList.indexOf('video') == -1) { //no video in tracklist
@@ -467,28 +544,38 @@ Fragment.prototype.generate = function (callback) {
                 frag.process(function (err, outPath) {
                     if (err) throw Error('Ffmpeg error');
 
-                    var writestream = gfs.createWriteStream({
-                        filename: frag.getOutputFilename(),
-                        mode: 'w',
-                        content_type: 'video/' + frag.inputFormat.name,
-                        metadata: {
-                            totalDuration: frag.totalDuration,
-                            lastRequest: Date.now()
-                        }
-                    }).on('close', function (file) {
-                        media.insert({
-                            frag: frag.originalOutputFileName,
-                            alias: file._id
-                        }, function (err) {
-                            frag.dbFile = file;
-                            fs.unlink(outPath, function (err) {
-                                if (err) console.error(err);
+                    getFullFramesJson(outPath, function (err, frames) {
+                        if (err)
+                            throw err;
+
+                        frag.outFrames = frames;
+
+                        var writestream = gfs.createWriteStream({
+                            filename: frag.getOutputFilename(),
+                            mode: 'w',
+                            content_type: 'video/' + frag.inputFormat.name,
+                            metadata: {
+                                totalDuration: frag.totalDuration,
+                                fragDuration: frag.iEnd - frag.iStart,
+                                lastRequest: Date.now(),
+                                frames: frames
+                            }
+                        }).on('close', function (file) {
+                            media.insert({
+                                frag: frag.originalOutputFileName,
+                                alias: file._id
+                            }, function (err) {
+                                frag.dbFile = file;
+                                fs.unlink(outPath, function (err) {
+                                    if (err) console.error(err);
+                                });
+                                callback(err, file);
                             });
-                            callback(err, file);
                         });
+                        fs.createReadStream(outPath).pipe(writestream);
                     });
-                    fs.createReadStream(outPath).pipe(writestream);
                 });
+
             });
         });
     });
