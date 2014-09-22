@@ -163,9 +163,7 @@ function serveVideo(video, req, res, options) {
                             }
                             asyncCallback(err);
                         });
-                    }
-
-                    ,
+                    },
                     function (asyncCallback) { //start frame
                         hashFrag.checkClosestIframe(hashFrag.ssStart, function (err, frame) {
                             if (frame) {
@@ -174,9 +172,7 @@ function serveVideo(video, req, res, options) {
                             }
                             asyncCallback(err);
                         });
-                    }
-
-                    ,
+                    },
                     function (asyncCallback) { //end frame
                         if (!hashFrag.ssEnd) {
                             endByte = totalBytes;
@@ -192,7 +188,6 @@ function serveVideo(video, req, res, options) {
                             asyncCallback(err);
                         });
                     }
-
                 ],
                 function (err) {
                     if (err) {
