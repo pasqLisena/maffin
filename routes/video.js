@@ -126,7 +126,7 @@ function serveVideo(video, req, res, options) {
 
             if (!hashFragJSON.t)
                 serveVideo(video, req, res, {ignoreRange: true});
-            var hashFrag = new Fragment(filename, hashFragJSON, {fromGfs: true, dbFile: video.dbFile});
+            var hashFrag = new Fragment(filename, hashFragJSON, {fromGfs: isAFragment, dbFile: isAFragment? dvideo.dbFile : null});
 
             var totalDuration, startByte, endByte, startNPT, endNPT, mdEnd = 0;
 
