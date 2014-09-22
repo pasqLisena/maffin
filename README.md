@@ -1,8 +1,11 @@
 MaFFiN
 ======
 
-A Media Fragment Server in Node.js.
+MaFFiN is a Node.JS server that supports the new  following the [Media Fragment W3C Reccomandation](http://www.w3.org/TR/media-frags/)..
 
+It supports temporal (npt) and track fragment, both in hash and query format.
+
+![MaFFiN is the acronym of MediA Fragment FIlesystem Node.JS server](https://github.com/pasqLisena/maffin/blob/master/public/images/maffin_logotipo.png)
 
 #Requirements
 
@@ -50,5 +53,8 @@ set DEBUG = maffin
 node www
 </pre>
 
-
-Coming soon...
+Than just try to run Media Fragments on your browser.
+Some examples:
+* [localhost:3000/video/video.mp4?t=10,20](localhost:3000/video/video.mp4?t=10,20)
+* [localhost:3000/video/video.mp4#t=10,20](localhost:3000/video/video.mp4#t=10,20)
+* [localhost:3000/video/video.mp4?t=10,20#t=10,20](localhost:3000/video/video.mp4?t=10,20#t=10,20)
