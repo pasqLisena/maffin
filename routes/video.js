@@ -48,7 +48,7 @@ router.get('/:filename', function (req, res, next) {
 
     try {
         var fragment = new Fragment(filename, mfquery);
-        fragment.generate(function (err, outputFragment) {
+        fragment.generate(function (err) {
             if (err) {
                 console.error(err);
                 console.error("Something went wrong.\nOriginal video will be served");
@@ -127,19 +127,8 @@ function serveVideo(video, req, res, options) {
             if (!hashFragJSON.t)
                 serveVideo(video, req, res, {ignoreRange: true});
             var hashFrag = new Fragment(filename, hashFragJSON, {fromGfs: true, dbFile: video.dbFile});
-//            hashFrag.checkSource(function () {
-            var totalDuration, startByte, endByte, startNPT, endNPT, mdEnd = 0;
 
-//            hashFrag.generate(function (err, outputFragment) {
-//                if (err) {
-//                    console.error(err);
-//                    console.error("Something went wrong. Original video will be served");
-//                    //serve original video
-//                    serveVideo(video, req, res, {ignoreRange: true});
-//                    return;
-//                }
-//                serveVideo(hashFrag, req, res, {ignoreRange: true});
-//            });
+            var totalDuration, startByte, endByte, startNPT, endNPT, mdEnd = 0;
 
             async.parallel([
                     function (asyncCallback) {//totalDuration
@@ -220,7 +209,7 @@ function serveVideo(video, req, res, options) {
                         outStream = new Buffer(file.slice(startByte, endByte));
 
                         if (includeSetup) {
-//                            mdStream = isAFragment ? gfs.createReadStream({'_id': video.dbFile._id, range: {startPos: 0, endPos: mdEnd}}) : fs.createReadStream(video, {start: 0, end: mdEnd});
+                            //preparing multipart headers
                             headers['Content-type'] = 'multipart/byteranges;boundary=End'; //note the lowercase "type"
 
                             mdStream = new Buffer(file.slice(0, mdEnd));
@@ -236,6 +225,7 @@ function serveVideo(video, req, res, options) {
                             block3 = new Buffer('\n--End\n', 'ascii');
                         }
 
+                        //preparing all headers
                         headers['Content-Range'] = 'bytes ' + startByte + '-' + endByte + '/' + totalBytes;
                         headers['Content-Length'] = includeSetup ? mdStream.length + outStream.length + block1.length + block2.length + block3.length + 2 : chunksize;
                         // the +2 is a +3 (for the 3 string buffers) -1 (because length are 0 based)
@@ -245,8 +235,6 @@ function serveVideo(video, req, res, options) {
 
                         if (DEBUG)
                             console.log('Content-Range-Mapping: ' + headers['Content-Range-Mapping']);
-
-//                        outStream = isAFragment ? gfs.createReadStream({'_id': video.dbFile._id, range: {startPos: startByte, endPos: endByte}}) : fs.createReadStream(video, {start: startByte, end: endByte});
 
                         res.writeHead(httpCode, headers);
                         if (!includeSetup) {

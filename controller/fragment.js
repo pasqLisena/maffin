@@ -343,7 +343,6 @@ Fragment.prototype.checkSource = function (callback) {
     ffmpeg.ffprobe(frag.inputPath, function (err, metadata) {
         if (err || !metadata || !metadata.hasOwnProperty('streams')) {
             console.error(err);
-            // TODO something
             callback(err, false);
             return;
         }
