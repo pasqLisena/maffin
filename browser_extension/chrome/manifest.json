@@ -1,7 +1,7 @@
 {
     "manifest_version": 2,
-    "name": "Media Fragments",
-    "version": "0.3",
+    "name": "MaFFiN",
+    "version": "0.4",
     "description": "Implements time range as specified in W3C Protocol for Media Fragments 1.0 Resolution in HTTP",
     "icons": {
         "128": "img/icon_128.png"

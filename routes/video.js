@@ -67,9 +67,10 @@ function serveVideo(video, req, res, options) {
     options = options || {};
     var isAFragment = video instanceof Fragment;
 
-    var totalBytes, mime, filename;
+    var totalBytes, mime, filename, totalDuration;
     if (isAFragment) {
         totalBytes = video.dbFile.length;
+        totalDuration = video.totalDuration || video.dbFile.metadata.totalDuration;
         mime = 'video/' + video.inputFormat.name;
         filename = video.dbFile.filename;
     } else {
@@ -142,117 +143,131 @@ function serveVideo(video, req, res, options) {
 //            });
 
             async.parallel([
-                function (asyncCallback) { // metadata
-                    if (!includeSetup) {
-                        asyncCallback();
-                        return;
-                    }
-                    hashFrag.checkClosestIframe(0, function (err, frame) {
-                        if (frame) {
-                            mdEnd = parseInt(frame.pkt_pos) - 1;
-
+                    function (asyncCallback) {//totalDuration
+                        if (isAFragment)  // I already have this information
+                            asyncCallback();
+                        else hashFrag.checkSource(function () {
+                            totalDuration = hashFrag.totalDuration;
+                            asyncCallback();
+                        });
+                    },
+                    function (asyncCallback) { // metadata
+                        if (!includeSetup) {
+                            asyncCallback();
+                            return;
                         }
-                        asyncCallback(err);
-                    });
-                },
-                function (asyncCallback) { //start frame
-                    hashFrag.checkClosestIframe(hashFrag.ssStart, function (err, frame) {
-                        if (frame) {
-                            startByte = parseInt(frame.pkt_pos);
-                            startNPT = frame.best_effort_timestamp_time;
-                        }
-                        asyncCallback(err);
-                    });
-                }, function (asyncCallback) { //end frame
-                    if (!hashFrag.ssEnd) {
-                        endByte = totalBytes;
-                        endNPT = 'end';
-                        asyncCallback();
-                        return;
+                        hashFrag.checkClosestIframe(0, function (err, frame) {
+                            if (frame) {
+                                mdEnd = parseInt(frame.pkt_pos) - 1;
+
+                            }
+                            asyncCallback(err);
+                        });
                     }
-                    hashFrag.checkClosestIframe(hashFrag.ssEnd, function (err, frame) {
-                        if (frame) {
-                            endByte = parseInt(frame.pkt_pos) + parseInt(frame.pkt_size);
-                            endNPT = frame.best_effort_timestamp_time + frame.pkt_duration_time;
-                        }
-                        asyncCallback(err);
-                    });
-                }
-            ], function (err) {
-                if (err) {
-                    console.error(err);
-                    console.error("Something went wrong.\nThe Range request will be ingored");
-                    serveVideo(video, req, res, true);
-                    return;
-                }
 
-                if (typeof endByte != 'number') {
-                    endNPT = hashFrag.totalDuration;
-                    endByte = totalBytes;
-                }
-
-                var readFile = function (callback) {
-                    if (isAFragment) {
-                        mongo.GridStore.read(db, video.dbFile.filename, callback);
-                    } else {
-                        fs.readFile(video, 'binary', callback);
+                    ,
+                    function (asyncCallback) { //start frame
+                        hashFrag.checkClosestIframe(hashFrag.ssStart, function (err, frame) {
+                            if (frame) {
+                                startByte = parseInt(frame.pkt_pos);
+                                startNPT = frame.best_effort_timestamp_time;
+                            }
+                            asyncCallback(err);
+                        });
                     }
-                };
 
-                readFile(function (err, file) {
+                    ,
+                    function (asyncCallback) { //end frame
+                        if (!hashFrag.ssEnd) {
+                            endByte = totalBytes;
+                            endNPT = 'end';
+                            asyncCallback();
+                            return;
+                        }
+                        hashFrag.checkClosestIframe(hashFrag.ssEnd, function (err, frame) {
+                            if (frame) {
+                                endByte = parseInt(frame.pkt_pos) + parseInt(frame.pkt_size);
+                                endNPT = frame.best_effort_timestamp_time + frame.pkt_duration_time;
+                            }
+                            asyncCallback(err);
+                        });
+                    }
+
+                ],
+                function (err) {
                     if (err) {
                         console.error(err);
-                        console.error("Something went wrong.\nThe Range request will be ignored");
+                        console.error("Something went wrong.\nThe Range request will be ingored");
                         serveVideo(video, req, res, true);
                         return;
                     }
-                    var mdStream, block1, block2, block3;
-                    outStream = new Buffer(file.slice(startByte, endByte));
 
-                    if (includeSetup) {
-//                            mdStream = isAFragment ? gfs.createReadStream({'_id': video.dbFile._id, range: {startPos: 0, endPos: mdEnd}}) : fs.createReadStream(video, {start: 0, end: mdEnd});
-                        headers['Content-type'] = 'multipart/byteranges;boundary=End'; //note the lowercase "type"
-
-                        mdStream = new Buffer(file.slice(0, mdEnd));
-
-                        var s1 = '\n--End\n' +
-                            'Content-type: ' + mime + '\n' +
-                            'Content-Range: bytes 0-' + mdEnd + '/' + totalBytes + '\n';
-                        var s2 = '\n--End\n' +
-                            'Content-type: ' + mime + '\n' +
-                            'Content-Range: bytes ' + startByte + '-' + endByte + '/' + totalBytes + '\n';
-                        block1 = new Buffer(s1, 'ascii');
-                        block2 = new Buffer(s2, 'ascii');
-                        block3 = new Buffer('\n--End\n', 'ascii');
+                    if (typeof endByte != 'number') {
+                        endNPT = hashFrag.totalDuration;
+                        endByte = totalBytes;
                     }
 
-                    headers['Content-Range'] = 'bytes ' + startByte + '-' + endByte + '/' + totalBytes;
-                    headers['Content-Length'] = includeSetup ? mdStream.length + outStream.length + block1.length + block2.length + block3.length + 2 : chunksize;
-                    // the +2 is a +3 (for the 3 string buffers) -1 (because length are 0 based)
-                    headers['Content-Range-Mapping'] = '{ t:npt ' + parseFloat(startNPT).toFixed(1) + '-' + parseFloat(endNPT).toFixed(1)
-                        + (includeSetup ? ';include-setup' : '') + ' } = { bytes '
-                        + (includeSetup ? '0-' + mdEnd + ',' : '') + startByte + '-' + endByte + '/' + totalBytes + ' }';
+                    var readFile = function (callback) {
+                        if (isAFragment) {
+                            mongo.GridStore.read(db, video.dbFile.filename, callback);
+                        } else {
+                            fs.readFile(video, 'binary', callback);
+                        }
+                    };
 
-                    if (DEBUG)
-                        console.log('Content-Range-Mapping: ' + headers['Content-Range-Mapping']);
+                    readFile(function (err, file) {
+                        if (err) {
+                            console.error(err);
+                            console.error("Something went wrong.\nThe Range request will be ignored");
+                            serveVideo(video, req, res, true);
+                            return;
+                        }
+                        var mdStream, block1, block2, block3;
+                        outStream = new Buffer(file.slice(startByte, endByte));
+
+                        if (includeSetup) {
+//                            mdStream = isAFragment ? gfs.createReadStream({'_id': video.dbFile._id, range: {startPos: 0, endPos: mdEnd}}) : fs.createReadStream(video, {start: 0, end: mdEnd});
+                            headers['Content-type'] = 'multipart/byteranges;boundary=End'; //note the lowercase "type"
+
+                            mdStream = new Buffer(file.slice(0, mdEnd));
+
+                            var s1 = '\n--End\n' +
+                                'Content-type: ' + mime + '\n' +
+                                'Content-Range: bytes 0-' + mdEnd + '/' + totalBytes + '\n';
+                            var s2 = '\n--End\n' +
+                                'Content-type: ' + mime + '\n' +
+                                'Content-Range: bytes ' + startByte + '-' + endByte + '/' + totalBytes + '\n';
+                            block1 = new Buffer(s1, 'ascii');
+                            block2 = new Buffer(s2, 'ascii');
+                            block3 = new Buffer('\n--End\n', 'ascii');
+                        }
+
+                        headers['Content-Range'] = 'bytes ' + startByte + '-' + endByte + '/' + totalBytes;
+                        headers['Content-Length'] = includeSetup ? mdStream.length + outStream.length + block1.length + block2.length + block3.length + 2 : chunksize;
+                        // the +2 is a +3 (for the 3 string buffers) -1 (because length are 0 based)
+                        headers['Content-Range-Mapping'] = '{ t:npt ' + parseFloat(startNPT).toFixed(1) + '-' + parseFloat(endNPT).toFixed(1)
+                            + '/0.0-' + parseFloat(totalDuration).toFixed(1) + (includeSetup ? ';include-setup' : '') + ' } = { bytes ' +
+                            (includeSetup ? '0-' + mdEnd + ',' : '') + startByte + '-' + endByte + '/' + totalBytes + ' }';
+
+                        if (DEBUG)
+                            console.log('Content-Range-Mapping: ' + headers['Content-Range-Mapping']);
 
 //                        outStream = isAFragment ? gfs.createReadStream({'_id': video.dbFile._id, range: {startPos: startByte, endPos: endByte}}) : fs.createReadStream(video, {start: startByte, end: endByte});
 
-                    res.writeHead(httpCode, headers);
-                    if (!includeSetup) {
-                        outStream.pipe(res);
-                    } else {
-                        res.write(block1);
-                        res.write(mdStream);
-                        res.write('0'); // ask to Yunlia
-                        res.write(block2);
-                        res.write(outStream);
-                        res.write('0'); // ask to Yunlia
-                        res.end(block3);
-                    }
+                        res.writeHead(httpCode, headers);
+                        if (!includeSetup) {
+                            outStream.pipe(res);
+                        } else {
+                            res.write(block1);
+                            res.write(mdStream);
+                            res.write('0'); // ask to Yunlia
+                            res.write(block2);
+                            res.write(outStream);
+                            res.write('0'); // ask to Yunlia
+                            res.end(block3);
+                        }
+                    });
                 });
-
-            });
 //            });
             return;
         }

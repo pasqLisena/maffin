@@ -7,7 +7,10 @@ const contentRangeRegex = new RegExp("^Content-Range: bytes ([0-9]+)-([0-9]+)/([
 var tRequests = {};
 
 chrome.runtime.onInstalled.addListener(function () {
-//    console.log('content HELLO!');
+   console.info('Hello\n' +
+       'This extension is part of the MaFFiN project developed at EURECOM.\n' +
+       'Enjoy it! :)\n' +
+       'pasquale.lisena@eurecom.fr\n\n');
 });
 
 chrome.webRequest.onBeforeSendHeaders.addListener(

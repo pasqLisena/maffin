@@ -213,6 +213,7 @@ Fragment.prototype.checkClosestIframe = function (time, callback) {
     var ffProcess = spawn(config.ffmpeg_path.ffprobe, ffOptions);
     if (this.options.fromGfs) {
         var rStream = gfs.createReadStream({'filename': this.fullInputFilename});
+
         rStream.pipe(ffProcess.stdin, {end:false});
         rStream.on('end', function(){
             rStream.unpipe();
@@ -227,10 +228,10 @@ Fragment.prototype.checkClosestIframe = function (time, callback) {
     ffProcess.stdout.on('data', function (data) {
         jsonStr += data;
     });
-    ffProcess.stderr.on('data', function (err) {
-        if (DEBUG)
-            console.error(err.toString());
-    });
+//    ffProcess.stderr.on('data', function (err) {
+//        if (DEBUG)
+//            console.error(err.toString());
+//    });
     ffProcess.on('close', function (code) {
         if (DEBUG)
             console.log('child process exited with code ' + code);
