@@ -57,4 +57,4 @@ Than just try to run Media Fragments on your browser.
 Some examples:
 * [localhost:3000/video/video.mp4?t=10,20](localhost:3000/video/video.mp4?t=10,20)
 * [localhost:3000/video/video.mp4#t=10,20](localhost:3000/video/video.mp4#t=10,20)
-* [localhost:3000/video/video.mp4?t=10,20#t=10,20](localhost:3000/video/video.mp4?t=10,20#t=10,20)
+* [localhost:3000/video/video.mp4?t=10,40#t=0,10](localhost:3000/video/video.mp4?t=10,40#t=0,10)
