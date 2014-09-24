@@ -7,10 +7,10 @@ const contentRangeRegex = new RegExp("^Content-Range: bytes ([0-9]+)-([0-9]+)/([
 var tRequests = {};
 
 chrome.runtime.onInstalled.addListener(function () {
-   console.info('Hello\n' +
-       'This extension is part of the MaFFiN project developed at EURECOM.\n' +
-       'Enjoy it! :)\n' +
-       'pasquale.lisena@eurecom.fr\n\n');
+    console.info('Hello\n' +
+        'This extension is part of the MaFFiN project developed at EURECOM.\n' +
+        'Enjoy it! :)\n' +
+        'pasquale.lisena@eurecom.fr\n\n');
 });
 
 chrome.webRequest.onBeforeSendHeaders.addListener(
@@ -76,7 +76,6 @@ chrome.webRequest.onBeforeSendHeaders.addListener(
                     contentRange1 = contentRange1.trim().match(contentRangeRegex);
                     var cRange1Diff = contentRange1[2] - contentRange1[1];
                     console.log(cRange1Diff);
-//                    view.skip(cRange1Diff + 1);
                     var mdStart = view.tell(), mdEnd;
                     var s = "";
                     while (s != null && s.trim().substr(2) != boundary) {
@@ -108,21 +107,19 @@ chrome.webRequest.onBeforeSendHeaders.addListener(
                     console.log("data: " + (dataEnd - dataStart) + " bytes");
 
                     view.seek(0);
-//                    var videoBin = new jDataView(file, mdStart, (mdEnd - mdStart));
-//                    videoBin.seek(videoBin.byteLength);
-//                    var bytes = view.getBytes((dataEnd - dataStart) - 1, dataStart);
-//                    videoBin.writeBytes(bytes);
-//                    console.log(videoBin)
 
-                    var bytes1 = view.getBytes((mdEnd - mdStart) - 1, mdStart);
-                    var bytes2 = view.getBytes((dataEnd - dataStart) - 1, dataStart);
+                    /*
+                     var bytes1 = view.getBytes((mdEnd - mdStart) - 1, mdStart);
+                     var bytes2 = view.getBytes((dataEnd - dataStart) - 1, dataStart);
 
-                    var binaryLength = bytes1.length + bytes2.length;
-                    var bin = new jBinary(binaryLength);
-                    bin.write('blob', bytes1);
-                    bin.write('blob', bytes2);
+                     var binaryLength = bytes1.length + bytes2.length;
+                     var bin = new jBinary(binaryLength);
+                     bin.write('blob', bytes1);
+                     bin.write('blob', bytes2);
+                     */
 
-                    var blobUri = bin.toURI('video/mp4');
+                    var bin = new jBinary(view);
+                    var blobUri = bin.toURI('text/plain');
                     console.log(blobUri);
                     chrome.tabs.create({'url': blobUri});
                 }
