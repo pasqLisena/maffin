@@ -37,6 +37,7 @@ You need also to setup the file <code>config.json</code>:
 }
 </pre>
 
+Please make sure that input_dir and output_dir exist on your filesystem.
 
 # Supports
 
