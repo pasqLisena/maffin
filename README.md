@@ -1,26 +1,27 @@
 MaFFiN
 ======
 
-MaFFiN is a Node.JS server that supports the new  following the [Media Fragment W3C Reccomandation](http://www.w3.org/TR/media-frags/)..
+MaFFiN is a Node.JS server that implements the [Media Fragment W3C Recommendation](http://www.w3.org/TR/media-frags/).
 
 It supports temporal (npt) and track fragment, both in hash and query format.
 
+See my [slides](https://www.slideshare.net/SquaLeLis/developing-a-nodejs).
+
 ![MaFFiN is the acronym of MediA Fragment FIlesystem Node.JS server](https://github.com/pasqLisena/maffin/blob/master/public/images/maffin_logotipo.png)
 
-#Requirements
+# Requirements
 
 * A recent version of [Node.js](http://www.nodejs.org/)
 * A [MongoDb](https://www.mongodb.org/) database running on your machine (or on a reachable host)
 * A recent build of [ffmpeg](https://ffmpeg.org/), that includes ffprobe
-
 
 # Install
 
 Please install dependencies with
 <pre>npm install</pre>
 
-You need also to setup the file <code>config.json</code>:
-<pre>
+You need also to setup the file `config.json`:
+```js
 {
     "app_options": {
         "input_dir": "D:\\video\\",           \\ input video path
@@ -35,9 +36,9 @@ You need also to setup the file <code>config.json</code>:
     },
     "debug": true                             \\ if false, it hides some logs on Node.js console
 }
-</pre>
+```
 
-Please make sure that input_dir and output_dir exist on your filesystem.
+Please make sure that `input_dir` and `output_dir` exist on your filesystem.
 
 # Supports
 
@@ -49,10 +50,8 @@ This server supports the most common containers and codecs for web videos:
 
 # How to use
 
-<pre>
-set DEBUG = maffin
-node www
-</pre>
+    set DEBUG = maffin
+    node www
 
 Than just try to run Media Fragments on your browser.
 Some examples:
